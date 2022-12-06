@@ -26,6 +26,8 @@
 #include <libvdeplug.h>
 #include <libvdeplug_mod.h>
 
+#define RESET_FLAGS 0
+#define CAN_RECEIVE 0x1
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args);
 static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int flags);
@@ -39,7 +41,8 @@ struct vde_wirefilter_conn {
 	void *handle;
 	struct vdeplug_module *module;
 	VDECONN *conn;
-	double duplication_probability;
+	double duplication_probability_lr;
+	double duplication_probability_rl;
 };
 
 // Module structure
@@ -63,9 +66,13 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	struct vde_wirefilter_conn *newconn = NULL;
 	VDECONN *conn;
 	char *nested_vnl;
-	char *duplication_probability_str = "0.0";
+	char *duplication_probability_str 	 = NULL;
+	char *duplication_probability_lr_str = "0.0";
+	char *duplication_probability_rl_str = "0.0";
 	struct vdeparms parms[] = {
 		{ "dup", &duplication_probability_str },
+		{ "dupLR", &duplication_probability_lr_str },
+		{ "dupRL", &duplication_probability_rl_str },
 		{ NULL, NULL }
 	};
 
@@ -81,7 +88,8 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	}
 
 	newconn->conn=conn;
-	newconn->duplication_probability = atof(duplication_probability_str);
+	newconn->duplication_probability_lr = duplication_probability_str != NULL ? atof(duplication_probability_str) : atof(duplication_probability_lr_str);
+	newconn->duplication_probability_rl = duplication_probability_str != NULL ? atof(duplication_probability_str) : atof(duplication_probability_rl_str);
 	
 	return (VDECONN *)newconn;
 
@@ -90,17 +98,36 @@ error:
 	return NULL;
 }
 
+// Right to left
 static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int flags) {
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
-	return vde_recv(vde_conn->conn, buf, len, flags);
+
+	if (drand48() < vde_conn->duplication_probability_rl/100) {
+		vde_send(conn, buf, len, flags | CAN_RECEIVE); // Resends the same packet to myself
+	}
+	return vde_recv(vde_conn->conn, buf, len, RESET_FLAGS);
+
+	// if (flags & CAN_RECEIVE) {
+	// 	return vde_recv(vde_conn->conn, buf, len, RESET_FLAGS);
+	// }
+
+	// // Duplication handling
+	// int to_send_packets = 1;
+	// to_send_packets += computeDuplicationCount(vde_conn->duplication_probability_rl);
+	// for (int i=0; i<to_send_packets; i++) {
+	// 	vde_send(conn, buf, len, flags | CAN_RECEIVE); // Resends the same packet to myself
+	// }
+
+	// return 1; // Drops the current packet
 }
 
+// Left to right
 static ssize_t vde_wirefilter_send(VDECONN *conn, const void *buf, size_t len, int flags) {
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
 
+	// Duplication handling
 	int to_send_packets = 1;
-	to_send_packets += computeDuplicationCount(vde_conn->duplication_probability);	// Duplication handling
-
+	to_send_packets += computeDuplicationCount(vde_conn->duplication_probability_lr);
 	for (int i=0; i<to_send_packets; i++) {
 		vde_send(vde_conn->conn, buf, len, flags);
 	}
