@@ -28,11 +28,6 @@
 #include <pthread.h>
 #include <poll.h>
 
-// #define RESET_FLAGS 0
-// #define CAN_RECEIVE 0x1
-
-#define LEFT_TO_RIGHT 0
-#define RIGHT_TO_LEFT 1
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args);
 static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int flags);
@@ -67,22 +62,21 @@ struct vdeplug_module vdeplug_ops = {
 	.vde_close = vde_wirefilter_close
 };
 
+
 struct packetHandlerData {
-	struct vde_wirefilter_conn *vde_conn;
-	int direction;
 	void *buf;
 	size_t len;
 	int flags;
 };
 
-void *packetHandler(void *param);
-int computeDuplicationCount(const double duplication_probability);
+static void *packetHandler(void *param);
+static int computeDuplicationCount(const double duplication_probability);
 
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
-	(void) descr;
-	(void) interface_version;
-	(void) open_args;
+	(void)descr;
+	(void)interface_version;
+	(void)open_args;
 
 	struct vde_wirefilter_conn *newconn = NULL;
 	VDECONN *conn;
@@ -97,32 +91,34 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ NULL, NULL }
 	};
 
-	nested_vnl = vde_parsenestparms(vde_url);						// Gets the nested VNL
-	if (vde_parsepathparms(vde_url, parms) != 0) { return NULL; } 	// Retrieves the plugin parameters
+	nested_vnl = vde_parsenestparms(vde_url);							// Gets the nested VNL
+	if ( vde_parsepathparms(vde_url, parms) != 0 ) { return NULL; } 	// Retrieves the plugin parameters
 	
-	// Opens a connection with the nested VNL
+	// Opens the connection with the nested VNL
 	conn = vde_open(nested_vnl, descr, open_args);
-	if (conn == NULL) { return  NULL; }
-	if ((newconn=calloc(1, sizeof(struct vde_wirefilter_conn))) == NULL) {
+	if (conn == NULL) { return NULL; }
+	if ( (newconn = calloc(1, sizeof(struct vde_wirefilter_conn))) == NULL ) {
 		errno = ENOMEM;
 		goto error;
 	}
+	newconn->conn=conn;
 
+	// Pipes initialization
 	newconn->send_pipefd = malloc(2*sizeof(int));
 	newconn->receive_pipefd = malloc(2*sizeof(int));
 	if ( pipe(newconn->send_pipefd) != 0 ) { goto error; } 
 	if ( pipe(newconn->receive_pipefd) != 0 ) { goto error; } 
 
+
 	// Starts packet handler thread
 	pthread_t packet_handler_thread;
 	if ( pthread_create(&packet_handler_thread, NULL, &packetHandler, (void*)newconn) != 0 ) { goto error; };
-
-	newconn->conn=conn;
-	newconn->duplication_probability_lr = duplication_probability_str != NULL ? atof(duplication_probability_str) : atof(duplication_probability_lr_str);
-	newconn->duplication_probability_rl = duplication_probability_str != NULL ? atof(duplication_probability_str) : atof(duplication_probability_rl_str);
 	newconn->packet_handler_thread = packet_handler_thread;
 
 	pthread_mutex_init(&newconn->receive_lock, NULL);
+
+	newconn->duplication_probability_lr = duplication_probability_lr_str != NULL ? atof(duplication_probability_lr_str) : atof(duplication_probability_str);
+	newconn->duplication_probability_rl = duplication_probability_rl_str != NULL ? atof(duplication_probability_rl_str) : atof(duplication_probability_str);
 
 	return (VDECONN *)newconn;
 
@@ -133,6 +129,9 @@ error:
 
 // Right to left
 static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int flags) {
+	/* 
+		Note: Packets from the nested plugin (right side) are intercepted by the packet handler thread first
+	*/
 	(void)flags;
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
 
@@ -143,10 +142,13 @@ static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int fla
 	int poll_ret;
 
 	if ( (poll_ret = poll(poll_fd, POLL_SIZE, -1)) > 0 ) {
-		len = read(vde_conn->receive_pipefd[0], buf, VDE_ETHBUFSIZE);
-		pthread_mutex_unlock(&vde_conn->receive_lock);
+		// A packet arrived from the thread
+		if (poll_fd[0].revents & POLLIN) {
+			len = read(vde_conn->receive_pipefd[0], buf, VDE_ETHBUFSIZE);
+			pthread_mutex_unlock(&vde_conn->receive_lock);
 
-		return len;
+			return len;
+		}
 	}
 
 	return 1;
@@ -156,16 +158,14 @@ static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int fla
 static ssize_t vde_wirefilter_send(VDECONN *conn, const void *buf, size_t len, int flags) {
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
 
-	struct packetHandlerData *tmp = malloc(sizeof(struct packetHandlerData));
-	tmp->vde_conn = vde_conn;
-	tmp->direction = LEFT_TO_RIGHT;
-	tmp->buf = malloc(len);
-	memcpy(tmp->buf, buf, len);
-	tmp->len = len;
-	tmp->flags = flags;
+	struct packetHandlerData *packet = malloc(sizeof(struct packetHandlerData));
+	packet->buf = malloc(len);
+	memcpy(packet->buf, buf, len);
+	packet->len = len;
+	packet->flags = flags;
 
 	// Passes the packet to the handler
-	write(vde_conn->send_pipefd[1], &tmp, sizeof(tmp));
+	write(vde_conn->send_pipefd[1], (void*)&packet, sizeof(void*));
 
 	return 0;
 }
@@ -196,41 +196,43 @@ static int vde_wirefilter_close(VDECONN *conn) {
 }
 
 
-
-void *packetHandler(void *param) {
+static void *packetHandler(void *param) {
 	pthread_detach(pthread_self());
 
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)param;
-	int poll_ret;
+	
 	const int POLL_SIZE = 2;
 	struct pollfd poll_fd[2] = {
 		{ .fd=vde_conn->send_pipefd[0], .events=POLLIN },
 		{ .fd=vde_datafd(vde_conn->conn), .events=POLLIN }
 	};
-	unsigned char buffer[VDE_ETHBUFSIZE];
+	int poll_ret;
+
+	unsigned char receive_buffer[VDE_ETHBUFSIZE];
+	ssize_t receive_length;
+
 
 	while(1) {
 		poll_ret = poll(poll_fd, POLL_SIZE, -1);
 
 		if (poll_ret > 0) {
+			// A packet has to be sent
 			if (poll_fd[0].revents & POLLIN) {
-				struct packetHandlerData *tmp;
-				read(vde_conn->send_pipefd[0], &tmp, sizeof(tmp));
+				struct packetHandlerData *packet;
+				read(vde_conn->send_pipefd[0], &packet, sizeof(void*));
 
-				for (int i=0; i<1+computeDuplicationCount(vde_conn->duplication_probability_lr); i++) {
-					vde_send(tmp->vde_conn->conn, tmp->buf, tmp->len, tmp->flags);
-				}
+				vde_send(vde_conn->conn, packet->buf, packet->len, packet->flags);
 
-				free(tmp);
+				free(packet);
 			}
-			if (poll_fd[1].revents & POLLIN) { // Something can be received from the nested plugin
-				ssize_t len = vde_recv(vde_conn->conn, buffer, VDE_ETHBUFSIZE, 0);
-				if (len == 1) { continue; } // Discard
 
-				for (int i=0; i<1+computeDuplicationCount(vde_conn->duplication_probability_rl); i++) {
-					pthread_mutex_lock(&vde_conn->receive_lock);
-					write(vde_conn->receive_pipefd[1], buffer, len);
-				}
+			// A packet can be received from the nested plugin
+			if (poll_fd[1].revents & POLLIN) {
+				receive_length = vde_recv(vde_conn->conn, receive_buffer, VDE_ETHBUFSIZE, 0);
+				if (receive_length == 1) { continue; } // Discard
+
+				pthread_mutex_lock(&vde_conn->receive_lock);
+				write(vde_conn->receive_pipefd[1], receive_buffer, receive_length);
 			}
 		}
 		else {
@@ -242,9 +244,8 @@ void *packetHandler(void *param) {
 }
 
 
-
 /* Returns the number of times a packet should be duplicated */
-int computeDuplicationCount(const double duplication_probability) {
+static int computeDuplicationCount(const double duplication_probability) {
 	int times = 0;
 
 	while (drand48() < (duplication_probability/100)) {
