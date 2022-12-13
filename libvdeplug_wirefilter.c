@@ -52,7 +52,9 @@ struct vde_wirefilter_conn {
 	double duplication_probability_rl;
 
 	pthread_t packet_handler_thread;
-	int *pipefd;
+	int *send_pipefd;
+	int *receive_pipefd;
+	pthread_mutex_t receive_lock;
 };
 
 // Module structure
@@ -106,20 +108,21 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		goto error;
 	}
 
-	int pipefd[2];
-	pipe(pipefd);
+	newconn->send_pipefd = malloc(2*sizeof(int));
+	newconn->receive_pipefd = malloc(2*sizeof(int));
+	if ( pipe(newconn->send_pipefd) != 0 ) { goto error; } 
+	if ( pipe(newconn->receive_pipefd) != 0 ) { goto error; } 
 
 	// Starts packet handler thread
 	pthread_t packet_handler_thread;
-	if ( pthread_create(&packet_handler_thread, NULL, &packetHandler, (void*)&pipefd[0]) != 0 ) { 
-		goto error;
-	};
+	if ( pthread_create(&packet_handler_thread, NULL, &packetHandler, (void*)newconn) != 0 ) { goto error; };
 
 	newconn->conn=conn;
 	newconn->duplication_probability_lr = duplication_probability_str != NULL ? atof(duplication_probability_str) : atof(duplication_probability_lr_str);
 	newconn->duplication_probability_rl = duplication_probability_str != NULL ? atof(duplication_probability_str) : atof(duplication_probability_rl_str);
 	newconn->packet_handler_thread = packet_handler_thread;
-	newconn->pipefd = pipefd;
+
+	pthread_mutex_init(&newconn->receive_lock, NULL);
 
 	return (VDECONN *)newconn;
 
@@ -130,45 +133,23 @@ error:
 
 // Right to left
 static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int flags) {
+	(void)flags;
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
 
-	if (1) {
-		return vde_recv(vde_conn->conn, buf, len, flags);
+	const int POLL_SIZE = 1;
+	struct pollfd poll_fd[1] = {
+		{ .fd=vde_conn->receive_pipefd[0], .events=POLLIN }
+	};
+	int poll_ret;
+
+	if ( (poll_ret = poll(poll_fd, POLL_SIZE, -1)) > 0 ) {
+		len = read(vde_conn->receive_pipefd[0], buf, VDE_ETHBUFSIZE);
+		pthread_mutex_unlock(&vde_conn->receive_lock);
+
+		return len;
 	}
 
-	struct packetHandlerData *tmp = malloc(sizeof(struct packetHandlerData));
-	tmp->vde_conn = vde_conn;
-	tmp->direction = RIGHT_TO_LEFT;
-	tmp->buf = malloc(len);
-	memcpy(tmp->buf, buf, len);
-	tmp->len = len;
-	tmp->flags = flags;
-
-	// Passes the packet to the handler
-	write(vde_conn->pipefd[1], &tmp, sizeof(tmp));
-
 	return 1;
-
-
-	// if (drand48() < vde_conn->duplication_probability_rl/100) {
-	// 	vde_send(conn, buf, len, flags); // Resends the same packet to myself
-	// }
-	// return vde_recv(vde_conn->conn, buf, len, flags);
-
-
-	/* --- Attempt with flags --- */
-	// if (flags & CAN_RECEIVE) {
-	// 	return vde_recv(vde_conn->conn, buf, len, RESET_FLAGS);
-	// }
-
-	// // Duplication handling
-	// int to_send_packets = 1;
-	// to_send_packets += computeDuplicationCount(vde_conn->duplication_probability_rl);
-	// for (int i=0; i<to_send_packets; i++) {
-	// 	vde_send(conn, buf, len, flags | CAN_RECEIVE); // Resends the same packet to myself
-	// }
-
-	// return 1; // Drops the current packet
 }
 
 // Left to right
@@ -184,14 +165,14 @@ static ssize_t vde_wirefilter_send(VDECONN *conn, const void *buf, size_t len, i
 	tmp->flags = flags;
 
 	// Passes the packet to the handler
-	write(vde_conn->pipefd[1], &tmp, sizeof(tmp));
+	write(vde_conn->send_pipefd[1], &tmp, sizeof(tmp));
 
 	return 0;
 }
 
 static int vde_wirefilter_datafd(VDECONN *conn) {
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
-	return vde_datafd(vde_conn->conn);
+	return vde_conn->receive_pipefd[0];
 }
 
 static int vde_wirefilter_ctlfd(VDECONN *conn) {
@@ -203,8 +184,11 @@ static int vde_wirefilter_close(VDECONN *conn) {
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
 
 	pthread_cancel(vde_conn->packet_handler_thread);
-	close(vde_conn->pipefd[0]);
-	close(vde_conn->pipefd[1]);
+	close(vde_conn->send_pipefd[0]);
+	close(vde_conn->send_pipefd[1]);
+	close(vde_conn->receive_pipefd[0]);
+	close(vde_conn->receive_pipefd[1]);
+	pthread_mutex_destroy(&vde_conn->receive_lock);
 	
 	int ret_value = vde_close(vde_conn->conn);
 	free(vde_conn);
@@ -216,28 +200,37 @@ static int vde_wirefilter_close(VDECONN *conn) {
 void *packetHandler(void *param) {
 	pthread_detach(pthread_self());
 
-	int receive_fd = *((int *)param);
+	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)param;
 	int poll_ret;
-	struct pollfd poll_fd[1] = {
-		{ .fd=receive_fd, .events=POLLIN }
+	const int POLL_SIZE = 2;
+	struct pollfd poll_fd[2] = {
+		{ .fd=vde_conn->send_pipefd[0], .events=POLLIN },
+		{ .fd=vde_datafd(vde_conn->conn), .events=POLLIN }
 	};
+	unsigned char buffer[VDE_ETHBUFSIZE];
 
 	while(1) {
-		poll_ret = poll(poll_fd, 1, -1);
+		poll_ret = poll(poll_fd, POLL_SIZE, -1);
 
 		if (poll_ret > 0) {
 			if (poll_fd[0].revents & POLLIN) {
 				struct packetHandlerData *tmp;
-				read(receive_fd, &tmp, sizeof(tmp));
+				read(vde_conn->send_pipefd[0], &tmp, sizeof(tmp));
 
-				if (tmp->direction == RIGHT_TO_LEFT) { // Packet forwarded to myself
-					vde_send((VDECONN *)tmp->vde_conn, tmp->buf, tmp->len, tmp->flags);
-				}
-				else {
+				for (int i=0; i<1+computeDuplicationCount(vde_conn->duplication_probability_lr); i++) {
 					vde_send(tmp->vde_conn->conn, tmp->buf, tmp->len, tmp->flags);
 				}
 
 				free(tmp);
+			}
+			if (poll_fd[1].revents & POLLIN) { // Something can be received from the nested plugin
+				ssize_t len = vde_recv(vde_conn->conn, buffer, VDE_ETHBUFSIZE, 0);
+				if (len == 1) { continue; } // Discard
+
+				for (int i=0; i<1+computeDuplicationCount(vde_conn->duplication_probability_rl); i++) {
+					pthread_mutex_lock(&vde_conn->receive_lock);
+					write(vde_conn->receive_pipefd[1], buffer, len);
+				}
 			}
 		}
 		else {
