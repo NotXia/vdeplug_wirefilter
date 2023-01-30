@@ -29,20 +29,13 @@
 #include <poll.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
+#include <wf_conn.h>
+#include <wf_queue.h>
+#include <wf_time.h>
 
 #define LEFT_TO_RIGHT 0
 #define RIGHT_TO_LEFT 1
 
-#define MS_TO_NS(ms) ((ms) * 1000000)
-
-typedef struct {
-	void *buf;
-	size_t len;
-	int flags;
-	int direction;
-
-	unsigned long long forward_time; 
-} Packet;
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args);
 static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int flags);
@@ -51,25 +44,6 @@ static int vde_wirefilter_datafd(VDECONN *conn);
 static int vde_wirefilter_ctlfd(VDECONN *conn);
 static int vde_wirefilter_close(VDECONN *conn);
 
-// Connection structure of the module
-struct vde_wirefilter_conn {
-	void *handle;
-	struct vdeplug_module *module;
-
-	VDECONN *conn;
-	
-	pthread_t packet_handler_thread;
-	int *send_pipefd;
-	int *receive_pipefd;
-	pthread_mutex_t receive_lock; // Mutex to prevent concurrent writes on the receive pipe
-
-	int queue_timer; // Timer for packets delay
-
-	Packet* queue[10000];
-	int queue_size;
-
-	long delay_lr, delay_rl;
-};
 
 // Module structure
 struct vdeplug_module vdeplug_ops = {
@@ -84,13 +58,6 @@ struct vdeplug_module vdeplug_ops = {
 static void *packetHandlerThread(void *param);
 static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet);
 static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet);
-
-static unsigned long long now_us();
-static void setTimer(struct vde_wirefilter_conn *vde_conn);
-
-static void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet);
-static Packet *dequeue(struct vde_wirefilter_conn *vde_conn);
-static Packet *queue_head(struct vde_wirefilter_conn *vde_conn);
 
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
@@ -226,6 +193,7 @@ static int vde_wirefilter_close(VDECONN *conn) {
 	close(vde_conn->send_pipefd[1]);
 	close(vde_conn->receive_pipefd[0]);
 	close(vde_conn->receive_pipefd[1]);
+	close(vde_conn->queue_timer);
 	pthread_mutex_destroy(&vde_conn->receive_lock);
 	
 	int ret_value = vde_close(vde_conn->conn);
@@ -288,7 +256,7 @@ static void *packetHandlerThread(void *param) {
 
 				Packet *packet;
 
-				while(vde_conn->queue_size > 0 && queue_head(vde_conn)->forward_time < now_us()) {
+				while(vde_conn->queue_size > 0 && queue_head(vde_conn)->forward_time < now_ns()) {
 					packet = dequeue(vde_conn);
 					sendPacket(vde_conn, packet);
 					free(packet);
@@ -307,6 +275,22 @@ static void *packetHandlerThread(void *param) {
 }
 
 
+static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
+	long delay = packet->direction == LEFT_TO_RIGHT ? vde_conn->delay_lr : vde_conn->delay_rl;
+
+	if (delay > 0) {
+		packet->forward_time = now_ns() + MS_TO_NS(delay);
+
+		enqueue(vde_conn, packet);
+		setTimer(vde_conn);
+	}
+	else {
+		sendPacket(vde_conn, packet);
+		free(packet);
+	}
+}
+
+
 /* Sends the packet to the correct destination */
 static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 	if (packet->direction == LEFT_TO_RIGHT) {
@@ -320,82 +304,4 @@ static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 		rw_len = write(vde_conn->receive_pipefd[1], packet->buf, packet->len);
 		if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
 	}
-}
-
-static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
-	long delay = packet->direction == LEFT_TO_RIGHT ? vde_conn->delay_lr : vde_conn->delay_rl;
-
-	if (delay > 0) {
-		packet->forward_time = now_us() + MS_TO_NS(delay);
-
-		enqueue(vde_conn, packet);
-		setTimer(vde_conn);
-	}
-	else {
-		sendPacket(vde_conn, packet);
-		free(packet);
-	}
-}
-
-
-/**
- * 
- * Time related functions
- * 
-*/
-
-/* Returns the current timestamp in microseconds */
-static unsigned long long now_us() {
-	struct timeval v;
-	gettimeofday(&v,NULL);
-	return (unsigned long long)(v.tv_sec*1000000000 + v.tv_usec*1000); 
-}
-
-/* Sets the timerfd for the next packet to send */
-static void setTimer(struct vde_wirefilter_conn *vde_conn) {
-	long long next_time_step = queue_head(vde_conn)->forward_time - now_us();
-	if (next_time_step <= 0) next_time_step = 1;
-
-	time_t seconds = next_time_step / (1000000000);
-	long nseconds = next_time_step % (1000000000);
-	struct itimerspec next = { { 0, 0 }, { seconds, nseconds } };
-	
-	timerfd_settime(vde_conn->queue_timer, 0, &next, NULL);
-}
-
-
-
-/**
- * 
- * Packet queue related functions
- * !! Currently with a temporary implementation !!
- * 
-*/
-
-static void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
-	int i=0;
-	while (i < vde_conn->queue_size && vde_conn->queue[i]->forward_time <= packet->forward_time) { i++; }
-
-	for (int j=vde_conn->queue_size-1; j>=i; j--) { vde_conn->queue[j+1] = vde_conn->queue[j]; }
-	vde_conn->queue[i] = packet;
-	vde_conn->queue_size++;
-}
-
-static Packet *dequeue(struct vde_wirefilter_conn *vde_conn) {
-	if (vde_conn->queue_size == 0) { return NULL; }
-	Packet *packet;
-
-	packet = vde_conn->queue[0];
-	
-	for (int i=0; i<vde_conn->queue_size-1; i++) {
-		vde_conn->queue[i] = vde_conn->queue[i+1];
-	}
-	vde_conn->queue_size--;
-
-	return packet;
-}
-
-static Packet *queue_head(struct vde_wirefilter_conn *vde_conn) {
-	if (vde_conn->queue_size == 0) { return NULL; }
-	return vde_conn->queue[0];
 }
