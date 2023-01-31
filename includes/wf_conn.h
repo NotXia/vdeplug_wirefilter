@@ -3,6 +3,11 @@
 #include <pthread.h>
 #include <libvdeplug.h>
 #include <libvdeplug_mod.h>
+#include "./wf_markov.h"
+
+
+#define LEFT_TO_RIGHT 0
+#define RIGHT_TO_LEFT 1
 
 
 typedef struct {
@@ -33,6 +38,13 @@ struct vde_wirefilter_conn {
 	int queue_size;
 
 	long delay_lr, delay_rl;
+
+	struct {
+		MarkovNode **nodes;
+		int current_node;
+		int nodes_count;
+		double *adjacency;
+	} markov;
 };
 
 #endif

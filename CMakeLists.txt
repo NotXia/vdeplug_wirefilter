@@ -38,7 +38,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories("./includes")
 add_subdirectory("./includes")
 add_library(vdeplug_wirefilter SHARED libvdeplug_wirefilter.c)
-target_link_libraries(vdeplug_wirefilter vdeplug_mod Threads::Threads wf_time wf_queue)
+target_link_libraries(vdeplug_wirefilter vdeplug_mod Threads::Threads wf_time wf_queue wf_markov)
 
 install(TARGETS vdeplug_wirefilter DESTINATION ${CMAKE_INSTALL_LIBDIR}/vdeplug)
 
