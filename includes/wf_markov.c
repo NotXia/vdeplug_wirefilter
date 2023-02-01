@@ -1,5 +1,6 @@
 #include "./wf_markov.h"
 #include <stdlib.h>
+#include <math.h>
 #include "./wf_conn.h"
 
 
@@ -109,8 +110,15 @@ double computeWireValue(struct vde_wirefilter_conn *vde_conn, int tag, int direc
 	switch (wv->algorithm) {
 		case ALGO_UNIFORM:
 			return wv->value + ( wv->plus * ((drand48()*2.0)-1.0) );
-		// case ALGO_GAUSS_NORMAL:
-		// 	return 0;
+		case ALGO_GAUSS_NORMAL: {
+			double x,y,r2;
+			do {
+				x = (2*drand48()) - 1;
+				y = (2*drand48()) - 1;
+				r2 = x*x + y*y;
+			} while (r2 >= 1.0);
+			return wv->value + ( wv->plus * SIGMA * x * sqrt( (-2 * log(r2)) / r2 ) );
+		}
 		default:
 			return 0.0;
 	}
