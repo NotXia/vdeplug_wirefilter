@@ -66,13 +66,11 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *nested_vnl;
 	char *delay_str[3] = { NULL, NULL, NULL };
 	char *dup_str[3] = { NULL, NULL, NULL };
+	char *loss_str[3] = { NULL, NULL, NULL };
 	struct vdeparms parms[] = {
-		{ "delay", &delay_str[BIDIRECTIONAL] },
-		{ "delayLR", &delay_str[LEFT_TO_RIGHT] },
-		{ "delayRL", &delay_str[RIGHT_TO_LEFT] },
-		{ "dup", &dup_str[BIDIRECTIONAL] },
-		{ "dupLR", &dup_str[LEFT_TO_RIGHT] },
-		{ "dupRL", &dup_str[RIGHT_TO_LEFT] },
+		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
+		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
+		{ "loss", &loss_str[BIDIRECTIONAL] }, { "lossLR", &loss_str[LEFT_TO_RIGHT] }, { "lossRL", &loss_str[RIGHT_TO_LEFT] },
 		{ NULL, NULL }
 	};
 
@@ -110,6 +108,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	markov_init(newconn);
 	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str[BIDIRECTIONAL], delay_str[LEFT_TO_RIGHT], delay_str[RIGHT_TO_LEFT]);
 	setWireValue(MARKOV_CURRENT(newconn), DUP, dup_str[BIDIRECTIONAL], dup_str[LEFT_TO_RIGHT], dup_str[RIGHT_TO_LEFT]);
+	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str[BIDIRECTIONAL], loss_str[LEFT_TO_RIGHT], loss_str[RIGHT_TO_LEFT]);
 
 
 	return (VDECONN *)newconn;
@@ -277,27 +276,32 @@ static void *packetHandlerThread(void *param) {
 
 
 static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
-	double delay = 0;
-	int send_times = 1;
-	
-	// Computes the number of duplicates
-	if (maxWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) > 0) {
-		while (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) / 100)) { send_times++; }
-	}
+	// Loss handling
+	if (drand48() >= (computeWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) / 100)) {
 
-	for (int i=0; i<send_times; i++) {
-		delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
+		double delay = 0;
+		int send_times = 1;
 
-		if (delay > 0) {
-			Packet *packet_copy = packetCopy(packet);
-			packet_copy->forward_time = now_ns() + MS_TO_NS(delay);
-
-			enqueue(vde_conn, packet_copy);
-			setTimer(vde_conn);
+		// Computes the number of duplicates
+		if (maxWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) > 0) {
+			while (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) / 100)) { send_times++; }
 		}
-		else {
-			sendPacket(vde_conn, packet);
+
+		for (int i=0; i<send_times; i++) {
+			delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
+
+			if (delay > 0) {
+				Packet *packet_copy = packetCopy(packet);
+				packet_copy->forward_time = now_ns() + MS_TO_NS(delay);
+
+				enqueue(vde_conn, packet_copy);
+				setTimer(vde_conn);
+			}
+			else {
+				sendPacket(vde_conn, packet);
+			}
 		}
+		
 	}
 
 	free(packet);
