@@ -8,6 +8,7 @@
 
 #define LEFT_TO_RIGHT 0
 #define RIGHT_TO_LEFT 1
+#define BIDIRECTIONAL 2
 
 
 typedef struct {
@@ -46,5 +47,7 @@ struct vde_wirefilter_conn {
 		double *adjacency;
 	} markov;
 };
+
+Packet *packetCopy(Packet *to_copy);
 
 #endif
