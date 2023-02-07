@@ -77,6 +77,10 @@ static int parseWireValueString(char* string, double *value, double *plus, char 
 	if (!string) { return -1; }
 	int n = strlen(string);
 
+	// Default values
+	*value = 0, *plus = 0;
+	*algorithm = ALGO_UNIFORM;
+
 	while ((string[n] == ' ' || string[n] == '\n' || string[n] == '\t') && n > 0) { string[n--] = '\0'; }
 
 	// Reads algorithm (if set)
