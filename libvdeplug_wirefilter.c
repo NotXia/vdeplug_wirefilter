@@ -106,12 +106,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 
 
 	markov_init(newconn);
-
-
-	setWireValue(newconn, newconn->markov.current_node, DELAY, LEFT_TO_RIGHT, delay_str ? atol(delay_str) : 0, 0, 0);
-	setWireValue(newconn, newconn->markov.current_node, DELAY, RIGHT_TO_LEFT, delay_str ? atol(delay_str) : 0, 0, 0);
-	if (delay_lr_str) { setWireValue(newconn, newconn->markov.current_node, DELAY, LEFT_TO_RIGHT, atol(delay_lr_str), 0, 0); }
-	if (delay_rl_str) { setWireValue(newconn, newconn->markov.current_node, DELAY, RIGHT_TO_LEFT, atol(delay_rl_str), 0, 0); }
+	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str, delay_lr_str, delay_rl_str);
 
 
 	return (VDECONN *)newconn;
@@ -279,7 +274,7 @@ static void *packetHandlerThread(void *param) {
 
 
 static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
-	long delay = computeWireValue(vde_conn, DELAY, packet->direction);
+	long delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
 
 	if (delay > 0) {
 		packet->forward_time = now_ns() + MS_TO_NS(delay);
