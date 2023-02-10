@@ -22,11 +22,11 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
-#include <time.h>
 #include <libvdeplug.h>
 #include <libvdeplug_mod.h>
 #include <pthread.h>
 #include <poll.h>
+#include <time.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
 #include <wf_conn.h>
@@ -54,8 +54,8 @@ struct vdeplug_module vdeplug_ops = {
 };
 
 static void *packetHandlerThread(void *param);
-static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet);
-static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet);
+static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
+static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
@@ -232,6 +232,7 @@ static void *packetHandlerThread(void *param) {
 				if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
 
 				handlePacket(vde_conn, packet);
+				free(packet);
 			}
 
 			// A packet can be received from the nested plugin
@@ -247,6 +248,7 @@ static void *packetHandlerThread(void *param) {
 				packet->direction = RIGHT_TO_LEFT;
 
 				handlePacket(vde_conn, packet);
+				free(packet);
 			}
 
 			// Time to send something
@@ -275,41 +277,42 @@ static void *packetHandlerThread(void *param) {
 }
 
 
-static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
+static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
 	// Loss handling
-	if (drand48() >= (computeWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) / 100)) {
-
-		double delay = 0;
-		int send_times = 1;
-
-		// Computes the number of duplicates
-		if (maxWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) > 0) {
-			while (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) / 100)) { send_times++; }
-		}
-
-		for (int i=0; i<send_times; i++) {
-			delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
-
-			if (delay > 0) {
-				Packet *packet_copy = packetCopy(packet);
-				packet_copy->forward_time = now_ns() + MS_TO_NS(delay);
-
-				enqueue(vde_conn, packet_copy);
-				setTimer(vde_conn);
-			}
-			else {
-				sendPacket(vde_conn, packet);
-			}
-		}
-		
+	if (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) / 100)) {
+		return;
 	}
 
-	free(packet);
+	double delay = 0;
+	int send_times = 1;
+
+	// Computes the number of duplicates
+	if (maxWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) > 0) {
+		while (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) / 100)) { send_times++; }
+	}
+
+	for (int i=0; i<send_times; i++) {
+		delay = 0;
+
+		// Packet delay
+		delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
+
+		if (delay > 0) {
+			Packet *packet_copy = packetCopy(packet);
+			packet_copy->forward_time = now_ns() + MS_TO_NS(delay);
+
+			enqueue(vde_conn, packet_copy);
+			setTimer(vde_conn);
+		}
+		else {
+			sendPacket(vde_conn, packet);
+		}
+	}
 }
 
 
 /* Sends the packet to the correct destination */
-static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
+static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
 	if (packet->direction == LEFT_TO_RIGHT) {
 		vde_send(vde_conn->conn, packet->buf, packet->len, packet->flags);
 	}

@@ -48,6 +48,6 @@ struct vde_wirefilter_conn {
 	} markov;
 };
 
-Packet *packetCopy(Packet *to_copy);
+Packet *packetCopy(const Packet *to_copy);
 
 #endif
