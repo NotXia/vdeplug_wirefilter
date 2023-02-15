@@ -68,11 +68,13 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *delay_str[3] = { NULL, NULL, NULL };
 	char *dup_str[3] = { NULL, NULL, NULL };
 	char *loss_str[3] = { NULL, NULL, NULL };
+	char *bursty_loss_str = NULL;
 	char *mtu_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
 		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
 		{ "loss", &loss_str[BIDIRECTIONAL] }, { "lossLR", &loss_str[LEFT_TO_RIGHT] }, { "lossRL", &loss_str[RIGHT_TO_LEFT] },
+		{ "lostburst", &bursty_loss_str },
 		{ "mtu", &mtu_str },
 		{ NULL, NULL }
 	};
@@ -112,6 +114,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str[BIDIRECTIONAL], delay_str[LEFT_TO_RIGHT], delay_str[RIGHT_TO_LEFT]);
 	setWireValue(MARKOV_CURRENT(newconn), DUP, dup_str[BIDIRECTIONAL], dup_str[LEFT_TO_RIGHT], dup_str[RIGHT_TO_LEFT]);
 	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str[BIDIRECTIONAL], loss_str[LEFT_TO_RIGHT], loss_str[RIGHT_TO_LEFT]);
+	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, NULL, NULL);
 	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, NULL, NULL);
 
 
@@ -282,20 +285,51 @@ static void *packetHandlerThread(void *param) {
 
 
 static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
-	// MTU handling
+	/* MTU handling */
 	if (minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction) > 0 && packet->len > minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction)) {
 		return;
 	}
 
-	// Loss handling
-	if (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) / 100)) {
-		return;
+
+	/* Loss handling */
+
+	// Total loss
+	if ( minWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) >= 100.0 ) { return; }
+
+	if (maxWireValue(MARKOV_CURRENT(vde_conn), BURSTYLOSS, packet->direction) > 0) {
+		// Loss with Gilbert model
+		double loss_val = computeWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) / 100;
+		double burst_len = computeWireValue(MARKOV_CURRENT(vde_conn), BURSTYLOSS, packet->direction);
+
+		switch (vde_conn->bursty_loss_status[packet->direction]) {
+			case OK_BURST:
+				if ( drand48() < (loss_val / (burst_len*(1-loss_val))) ) { 
+					vde_conn->bursty_loss_status[packet->direction] = FAULTY_BURST; 
+				}
+				break;
+			case FAULTY_BURST:
+				if ( drand48() < (1.0 / burst_len) ) { 
+					vde_conn->bursty_loss_status[packet->direction] = OK_BURST; 
+				}
+				break;
+		}
+
+		if (vde_conn->bursty_loss_status[packet->direction] != OK_BURST) { return; }
 	}
+	else {
+		vde_conn->bursty_loss_status[packet->direction] = OK_BURST;
+		
+		// Standard loss handling
+		if (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) / 100)) {
+			return;
+		}
+	}
+
 
 	double delay = 0;
 	int send_times = 1;
 
-	// Computes the number of duplicates
+	/* Computes the number of duplicates */
 	if (maxWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) > 0) {
 		while (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), DUP, packet->direction) / 100)) { send_times++; }
 	}
@@ -303,7 +337,7 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 	for (int i=0; i<send_times; i++) {
 		delay = 0;
 
-		// Packet delay
+		/* Packet delay */
 		delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
 
 		if (delay > 0) {

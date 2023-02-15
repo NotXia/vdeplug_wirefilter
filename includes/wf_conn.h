@@ -10,6 +10,8 @@
 #define RIGHT_TO_LEFT 1
 #define BIDIRECTIONAL 2
 
+#define OK_BURST 0
+#define FAULTY_BURST 1
 
 typedef struct {
 	void *buf;
@@ -38,14 +40,14 @@ struct vde_wirefilter_conn {
 	Packet* queue[10000];
 	int queue_size;
 
-	long delay_lr, delay_rl;
-
 	struct {
 		MarkovNode **nodes;
 		int current_node;
 		int nodes_count;
 		double *adjacency;
 	} markov;
+
+	char bursty_loss_status[2];
 };
 
 Packet *packetCopy(const Packet *to_copy);
