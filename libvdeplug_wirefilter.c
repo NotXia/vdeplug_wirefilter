@@ -33,6 +33,7 @@
 #include <wf_queue.h>
 #include <wf_time.h>
 #include <wf_markov.h>
+#include "./includes/wf_debug.h"
 
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args);
