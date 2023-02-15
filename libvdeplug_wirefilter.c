@@ -68,10 +68,12 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *delay_str[3] = { NULL, NULL, NULL };
 	char *dup_str[3] = { NULL, NULL, NULL };
 	char *loss_str[3] = { NULL, NULL, NULL };
+	char *mtu_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
 		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
 		{ "loss", &loss_str[BIDIRECTIONAL] }, { "lossLR", &loss_str[LEFT_TO_RIGHT] }, { "lossRL", &loss_str[RIGHT_TO_LEFT] },
+		{ "mtu", &mtu_str },
 		{ NULL, NULL }
 	};
 
@@ -110,6 +112,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str[BIDIRECTIONAL], delay_str[LEFT_TO_RIGHT], delay_str[RIGHT_TO_LEFT]);
 	setWireValue(MARKOV_CURRENT(newconn), DUP, dup_str[BIDIRECTIONAL], dup_str[LEFT_TO_RIGHT], dup_str[RIGHT_TO_LEFT]);
 	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str[BIDIRECTIONAL], loss_str[LEFT_TO_RIGHT], loss_str[RIGHT_TO_LEFT]);
+	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, NULL, NULL);
 
 
 	return (VDECONN *)newconn;
@@ -279,6 +282,11 @@ static void *packetHandlerThread(void *param) {
 
 
 static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
+	// MTU handling
+	if (minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction) > 0 && packet->len > minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction)) {
+		return;
+	}
+
 	// Loss handling
 	if (drand48() < (computeWireValue(MARKOV_CURRENT(vde_conn), LOSS, packet->direction) / 100)) {
 		return;
