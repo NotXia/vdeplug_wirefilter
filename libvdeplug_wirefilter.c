@@ -247,7 +247,7 @@ static void *packetHandlerThread(void *param) {
 				if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
 
 				handlePacket(vde_conn, packet);
-				free(packet);
+				packetDestroy(packet);
 			}
 
 			// A packet can be received from the nested plugin
@@ -263,7 +263,7 @@ static void *packetHandlerThread(void *param) {
 				packet->direction = RIGHT_TO_LEFT;
 
 				handlePacket(vde_conn, packet);
-				free(packet);
+				packetDestroy(packet);
 			}
 
 			// Time to send something

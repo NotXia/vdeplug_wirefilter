@@ -64,5 +64,6 @@ struct vde_wirefilter_conn {
 };
 
 Packet *packetCopy(const Packet *to_copy);
+void packetDestroy(Packet *to_destroy);
 
 #endif
