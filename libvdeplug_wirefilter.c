@@ -70,12 +70,14 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *loss_str[3] = { NULL, NULL, NULL };
 	char *bursty_loss_str = NULL;
 	char *mtu_str = NULL;
+	char *fifo_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
 		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
 		{ "loss", &loss_str[BIDIRECTIONAL] }, { "lossLR", &loss_str[LEFT_TO_RIGHT] }, { "lossRL", &loss_str[RIGHT_TO_LEFT] },
 		{ "lostburst", &bursty_loss_str },
 		{ "mtu", &mtu_str },
+		{ "fifo", &fifo_str },
 		{ NULL, NULL }
 	};
 
@@ -106,8 +108,8 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	pthread_mutex_init(&newconn->receive_lock, NULL);
 
 
-	newconn->fifoness = FIFO;
-	
+	newconn->fifoness = fifo_str == NULL ? NO_FIFO : FIFO;
+
 	newconn->queue_timer = timerfd_create(CLOCK_REALTIME, 0);
 	newconn->queue.queue = NULL;
 	newconn->queue.size = 0;
