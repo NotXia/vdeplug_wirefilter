@@ -106,8 +106,16 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	pthread_mutex_init(&newconn->receive_lock, NULL);
 
 
+	newconn->fifoness = FIFO;
+	
 	newconn->queue_timer = timerfd_create(CLOCK_REALTIME, 0);
-	newconn->queue_size = 0;
+	newconn->queue.queue = NULL;
+	newconn->queue.size = 0;
+	newconn->queue.max_size = 0;
+	newconn->queue.byte_size[LEFT_TO_RIGHT] = 0;
+	newconn->queue.byte_size[RIGHT_TO_LEFT] = 0;
+	newconn->queue.max_forward_time = 0;
+	newconn->queue.counter = 0;
 
 
 	markov_init(newconn);
@@ -265,14 +273,14 @@ static void *packetHandlerThread(void *param) {
 
 				Packet *packet;
 
-				while(vde_conn->queue_size > 0 && queue_head(vde_conn)->forward_time < now_ns()) {
+				while(vde_conn->queue.size > 0 && nextQueueTime(vde_conn) < now_ns()) {
 					packet = dequeue(vde_conn);
 					sendPacket(vde_conn, packet);
 					free(packet);
 				}
 
 				// Sets the timer for the next packet
-				if (vde_conn->queue_size > 0) {
+				if (vde_conn->queue.size > 0) {
 					setTimer(vde_conn);
 				}
 			}
@@ -342,9 +350,8 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 
 		if (delay > 0) {
 			Packet *packet_copy = packetCopy(packet);
-			packet_copy->forward_time = now_ns() + MS_TO_NS(delay);
 
-			enqueue(vde_conn, packet_copy);
+			enqueue(vde_conn, packet_copy, now_ns() + MS_TO_NS(delay));
 			setTimer(vde_conn);
 		}
 		else {

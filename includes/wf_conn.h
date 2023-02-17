@@ -4,6 +4,7 @@
 #include <libvdeplug.h>
 #include <libvdeplug_mod.h>
 #include "./wf_markov.h"
+#include "./wf_queue.h"
 
 
 #define LEFT_TO_RIGHT 0
@@ -13,14 +14,17 @@
 #define OK_BURST 0
 #define FAULTY_BURST 1
 
-typedef struct {
+#define NO_FIFO 0
+#define FIFO	1
+
+
+struct packet_t {
 	void *buf;
 	size_t len;
 	int flags;
 	int direction;
-
-	unsigned long long forward_time; 
-} Packet;
+};
+typedef struct packet_t Packet;
 
 
 // Connection structure of the module
@@ -36,9 +40,18 @@ struct vde_wirefilter_conn {
 	pthread_mutex_t receive_lock; // Mutex to prevent concurrent writes on the receive pipe
 
 	int queue_timer; // Timer for packets delay
+	char fifoness;
 
-	Packet* queue[10000];
-	int queue_size;
+	struct {
+		QueueNode **queue; // Priority queue implemented as heap
+		unsigned int size;
+		unsigned int max_size;
+		unsigned int byte_size[2];
+		
+		// To preserve fifoness
+		unsigned long long max_forward_time;
+		unsigned int counter;
+	} queue;
 
 	struct {
 		MarkovNode **nodes;
