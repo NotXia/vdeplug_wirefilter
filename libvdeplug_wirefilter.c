@@ -71,6 +71,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *bursty_loss_str = NULL;
 	char *mtu_str = NULL;
 	char *nofifo_str = NULL;
+	char *channel_size_str[3] = { NULL, NULL, NULL };
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
 		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
@@ -78,6 +79,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "lostburst", &bursty_loss_str },
 		{ "mtu", &mtu_str },
 		{ "nofifo", &nofifo_str },
+		{ "bufsize", &channel_size_str[BIDIRECTIONAL] }, { "lossLR", &channel_size_str[LEFT_TO_RIGHT] }, { "lossRL", &channel_size_str[RIGHT_TO_LEFT] },
 		{ NULL, NULL }
 	};
 
@@ -126,6 +128,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str[BIDIRECTIONAL], loss_str[LEFT_TO_RIGHT], loss_str[RIGHT_TO_LEFT]);
 	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, NULL, NULL);
 	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, NULL, NULL);
+	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str[BIDIRECTIONAL], channel_size_str[LEFT_TO_RIGHT], channel_size_str[RIGHT_TO_LEFT]);
 
 
 	return (VDECONN *)newconn;
@@ -346,6 +349,14 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 
 	for (int i=0; i<send_times; i++) {
 		delay = 0;
+
+		/* Buffer size handling */
+		if (maxWireValue(MARKOV_CURRENT(vde_conn), CHANBUFSIZE, packet->direction)) {
+			double buffer_max_size = computeWireValue(MARKOV_CURRENT(vde_conn), CHANBUFSIZE, packet->direction);
+			if (vde_conn->queue.byte_size[packet->direction] + packet->len > buffer_max_size) {
+				return;
+			}
+		}
 
 		/* Packet delay */
 		delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
