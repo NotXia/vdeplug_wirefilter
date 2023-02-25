@@ -3,9 +3,10 @@
 #include <pthread.h>
 #include <libvdeplug.h>
 #include <libvdeplug_mod.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include "./wf_markov.h"
 #include "./wf_queue.h"
-
 
 #define LEFT_TO_RIGHT 0
 #define RIGHT_TO_LEFT 1
@@ -16,6 +17,8 @@
 
 #define NO_FIFO 0
 #define FIFO	1
+
+#define BLINK_MESSAGE_CONTENT_SIZE 20 // Size of blink messages without the id
 
 
 struct packet_t {
@@ -59,6 +62,13 @@ struct vde_wirefilter_conn {
 		int nodes_count;
 		double *adjacency;
 	} markov;
+
+	struct {
+		int socket_fd;
+		struct sockaddr_un socket_info;
+		char *message;
+		char id_len;
+	} blink;
 
 	char bursty_loss_status[2];
 };

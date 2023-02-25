@@ -58,6 +58,9 @@ static void *packetHandlerThread(void *param);
 static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 
+static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path);
+static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id);
+
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
 	(void)descr; (void)interface_version; (void)open_args;
@@ -72,6 +75,8 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *mtu_str = NULL;
 	char *nofifo_str = NULL;
 	char *channel_size_str[3] = { NULL, NULL, NULL };
+	char *blink_path_str = NULL;
+	char *blink_id_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
 		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
@@ -80,6 +85,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "mtu", &mtu_str },
 		{ "nofifo", &nofifo_str },
 		{ "bufsize", &channel_size_str[BIDIRECTIONAL] }, { "lossLR", &channel_size_str[LEFT_TO_RIGHT] }, { "lossRL", &channel_size_str[RIGHT_TO_LEFT] },
+		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
 		{ NULL, NULL }
 	};
 
@@ -129,6 +135,12 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, NULL, NULL);
 	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, NULL, NULL);
 	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str[BIDIRECTIONAL], channel_size_str[LEFT_TO_RIGHT], channel_size_str[RIGHT_TO_LEFT]);
+
+
+	if (blink_path_str) { 
+		openBlinkSocket(newconn, blink_path_str); 
+		if ( setBlinkId(newconn, blink_id_str) == -1 ) { goto error; };
+	}
 
 
 	return (VDECONN *)newconn;
@@ -376,6 +388,15 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 
 /* Sends the packet to the correct destination */
 static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
+	if (vde_conn->blink.socket_fd) {
+		char *message_content = vde_conn->blink.message + (vde_conn->blink.id_len+1); // Skip id and blank
+		
+		snprintf(message_content, BLINK_MESSAGE_CONTENT_SIZE, "%s %ld\n",
+				(packet->direction == LEFT_TO_RIGHT) ? "LR" : ((packet->direction == RIGHT_TO_LEFT) ? "RL" : "--"), packet->len);		
+		sendto(vde_conn->blink.socket_fd, vde_conn->blink.message, strlen(vde_conn->blink.message), 0, 
+				(struct sockaddr *)&vde_conn->blink.socket_info, sizeof(vde_conn->blink.socket_info));
+	}
+
 	if (packet->direction == LEFT_TO_RIGHT) {
 		vde_send(vde_conn->conn, packet->buf, packet->len, packet->flags);
 	}
@@ -387,4 +408,26 @@ static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packe
 		rw_len = write(vde_conn->receive_pipefd[1], packet->buf, packet->len);
 		if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
 	}
+}
+
+
+static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path) {
+	vde_conn->blink.socket_info.sun_family = PF_UNIX;
+	strncpy(vde_conn->blink.socket_info.sun_path, socket_path, sizeof(vde_conn->blink.socket_info.sun_path)-1);
+
+	vde_conn->blink.socket_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+}
+
+static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id) {
+	char pid_str[6+1];
+	char *to_set_id = id;
+
+	// If id is not set, defaults to pid
+	if (to_set_id == NULL) {
+		snprintf(pid_str, sizeof(pid_str), "%06d", getpid());
+		to_set_id = pid_str;
+	}
+
+	vde_conn->blink.id_len = strlen(to_set_id);
+	return asprintf(&vde_conn->blink.message, "%s %*c", to_set_id, BLINK_MESSAGE_CONTENT_SIZE, ' ');
 }
