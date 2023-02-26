@@ -5,13 +5,16 @@
 #include <stdio.h>
 #include <string.h>
 
-
 #define ADJMAPN(M, I, J, N) (M)[(I)*(N)+(J)]
 #define ADJMAP(vde_conn, I, J) ADJMAPN((vde_conn)->markov.adjacency, (I), (J), (vde_conn)->markov.nodes_count)
 
 #define ALGO_UNIFORM      0
 #define ALGO_GAUSS_NORMAL 1
 #define SIGMA (1.0/3.0) // more than 98% inside the bell
+
+#define KILO (1<<10)
+#define MEGA (1<<20)
+#define GIGA (1<<30)
 
 
 void markov_init(struct vde_wirefilter_conn *vde_conn) {
@@ -75,11 +78,12 @@ void markov_resize(struct vde_wirefilter_conn *vde_conn, int new_nodes_count) {
 
 static int parseWireValueString(char* string, double *value, double *plus, char *algorithm) {
 	if (!string) { return -1; }
-	int n = strlen(string);
+	int n = strlen(string) - 1;
 
 	// Default values
 	*value = 0, *plus = 0;
 	*algorithm = ALGO_UNIFORM;
+	int multiplier = 1;
 
 	while ((string[n] == ' ' || string[n] == '\n' || string[n] == '\t') && n > 0) { string[n--] = '\0'; }
 
@@ -97,8 +101,24 @@ static int parseWireValueString(char* string, double *value, double *plus, char 
 			break;
 	}
 
+	// Reads multiplier (if set)
+	switch (string[n]) {
+		case 'k': 
+		case 'K':
+			multiplier = KILO; break;
+		case 'm': 
+		case 'M':
+			multiplier = MEGA; break;
+		case 'g': 
+		case 'G':
+			multiplier = GIGA; break;
+		default:
+			multiplier = 1; break;
+	}
+
 	// Reads value and plus
 	if (sscanf(string, "%lf+%lf", value, plus) <= 0) { return -1; }
+	*value = *value * multiplier;
 
 	return 0;
 }
