@@ -401,7 +401,13 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 		}
 
 		/* Packet delay */
-		delay_ms += computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
+		if (maxWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction) > 0) {
+			double delay_value = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
+	
+			if (delay_value > 0) {
+				delay_ms += delay_value;
+			}
+		}
 
 
 		if (delay_ms > 0) {
