@@ -77,6 +77,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *channel_size_str[3] = { NULL, NULL, NULL };
 	char *blink_path_str = NULL;
 	char *blink_id_str = NULL;
+	char *bandwidth_str[3] = { NULL, NULL, NULL };
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
 		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
@@ -86,6 +87,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "nofifo", &nofifo_str },
 		{ "bufsize", &channel_size_str[BIDIRECTIONAL] }, { "lossLR", &channel_size_str[LEFT_TO_RIGHT] }, { "lossRL", &channel_size_str[RIGHT_TO_LEFT] },
 		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
+		{ "bandwidth", &bandwidth_str[BIDIRECTIONAL] }, { "bandwidthLR", &bandwidth_str[LEFT_TO_RIGHT] }, { "bandwidthRL", &bandwidth_str[RIGHT_TO_LEFT] },
 		{ NULL, NULL }
 	};
 
@@ -135,12 +137,17 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, NULL, NULL);
 	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, NULL, NULL);
 	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str[BIDIRECTIONAL], channel_size_str[LEFT_TO_RIGHT], channel_size_str[RIGHT_TO_LEFT]);
+	setWireValue(MARKOV_CURRENT(newconn), BANDWIDTH, bandwidth_str[BIDIRECTIONAL], bandwidth_str[LEFT_TO_RIGHT], bandwidth_str[RIGHT_TO_LEFT]);
 
 
 	if (blink_path_str) { 
 		openBlinkSocket(newconn, blink_path_str); 
 		if ( setBlinkId(newconn, blink_id_str) == -1 ) { goto error; };
 	}
+
+
+	newconn->bandwidth_next[LEFT_TO_RIGHT] = 0;
+	newconn->bandwidth_next[RIGHT_TO_LEFT] = 0;
 
 
 	return (VDECONN *)newconn;
@@ -351,7 +358,7 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 	}
 
 
-	double delay = 0;
+	double delay_ms = 0;
 	int send_times = 1;
 
 	/* Computes the number of duplicates */
@@ -360,7 +367,7 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 	}
 
 	for (int i=0; i<send_times; i++) {
-		delay = 0;
+		delay_ms = 0;
 
 		/* Buffer size handling */
 		if (maxWireValue(MARKOV_CURRENT(vde_conn), CHANBUFSIZE, packet->direction)) {
@@ -370,13 +377,37 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 			}
 		}
 
-		/* Packet delay */
-		delay = computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
+		/* Bandwidth handling */
+		if (maxWireValue(MARKOV_CURRENT(vde_conn), BANDWIDTH, packet->direction) > 0) {
+			double bandwidth = computeWireValue(MARKOV_CURRENT(vde_conn), BANDWIDTH, packet->direction);
 
-		if (delay > 0) {
+			if (bandwidth <= 0) { return; }
+			if (bandwidth > 0) {
+				double send_time_ms = (packet->len*1000) / bandwidth;
+				uint64_t now = now_ns();
+
+				if (now > vde_conn->bandwidth_next[packet->direction]) {
+					// Bandwidth is still below the limit, delay this one to keep the bandwidth up to the limit
+					vde_conn->bandwidth_next[packet->direction] = now;
+					delay_ms += send_time_ms;
+				} else {
+					// Bandwidth is overflowing, delay this one until the next bandwidth timestamp 
+					double diff = NS_TO_MS( vde_conn->bandwidth_next[packet->direction] - now );
+					delay_ms += diff + send_time_ms;
+				}
+
+				vde_conn->bandwidth_next[packet->direction] += MS_TO_NS(send_time_ms);
+			}
+		}
+
+		/* Packet delay */
+		delay_ms += computeWireValue(MARKOV_CURRENT(vde_conn), DELAY, packet->direction);
+
+
+		if (delay_ms > 0) {
 			Packet *packet_copy = packetCopy(packet);
 
-			enqueue(vde_conn, packet_copy, now_ns() + MS_TO_NS(delay));
+			enqueue(vde_conn, packet_copy, now_ns() + MS_TO_NS(delay_ms));
 			setTimer(vde_conn);
 		}
 		else {

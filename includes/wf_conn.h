@@ -71,6 +71,7 @@ struct vde_wirefilter_conn {
 	} blink;
 
 	char bursty_loss_status[2];
+	uint64_t bandwidth_next[2]; // Next timestamp (ns) when a packet can be sent
 };
 
 Packet *packetCopy(const Packet *to_copy);
