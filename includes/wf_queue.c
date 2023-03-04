@@ -43,7 +43,7 @@ static int compareNode(QueueNode *node1, QueueNode *node2) {
 	}
 }
 
-void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, unsigned long long forward_time) {
+void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, uint64_t forward_time) {
 	QueueNode *new = malloc(sizeof(QueueNode));
 
 
@@ -119,14 +119,14 @@ Packet *dequeue(struct vde_wirefilter_conn *vde_conn) {
 	return out_packet;
 }
 
-unsigned long long nextQueueTime(struct vde_wirefilter_conn *vde_conn) {
+uint64_t nextQueueTime(struct vde_wirefilter_conn *vde_conn) {
 	return vde_conn->queue.queue[1]->forward_time;
 }
 
 
 /* Sets the timerfd for the next packet to send */
 void setTimer(struct vde_wirefilter_conn *vde_conn) {
-	long long next_time_step = nextQueueTime(vde_conn) - now_ns();
+	int64_t next_time_step = nextQueueTime(vde_conn) - now_ns();
 	if (next_time_step <= 0) next_time_step = 1;
 
 	time_t seconds = next_time_step / (1000000000);

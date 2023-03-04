@@ -5,6 +5,6 @@
 #define NS_TO_MS(ns) ((ns) / 1000000)
 #define NS_TO_US(ns) ((ns) / 1000)
 
-unsigned long long now_ns();
+uint64_t now_ns();
 
 #endif

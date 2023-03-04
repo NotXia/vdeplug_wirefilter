@@ -52,7 +52,7 @@ struct vde_wirefilter_conn {
 		unsigned int byte_size[2];
 		
 		// To preserve fifoness
-		unsigned long long max_forward_time;
+		uint64_t max_forward_time;
 		unsigned int counter;
 	} queue;
 
