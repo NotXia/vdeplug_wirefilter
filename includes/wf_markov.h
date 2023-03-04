@@ -9,7 +9,8 @@
 #define MTU 4
 #define CHANBUFSIZE 5
 #define BANDWIDTH 6
-#define MARKOV_NODE_VALUES 7
+#define SPEED 7
+#define MARKOV_NODE_VALUES 8
 
 #define MARKOV_GET_NODE(vde_conn, node) (vde_conn)->markov.nodes[(node)]
 #define MARKOV_CURRENT(vde_conn) 		MARKOV_GET_NODE(vde_conn, (vde_conn)->markov.current_node)

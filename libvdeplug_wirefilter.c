@@ -67,6 +67,7 @@ static char lossHandler(struct vde_wirefilter_conn *vde_conn, const Packet *pack
 static int duplicatesHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static char bufferSizeHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static double bandwidthHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
+static double speedHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static double delayHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 
 
@@ -90,6 +91,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *blink_path_str = NULL;
 	char *blink_id_str = NULL;
 	char *bandwidth_str[3] = { NULL, NULL, NULL };
+	char *speed_str[3] = { NULL, NULL, NULL };
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
 		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
@@ -100,6 +102,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "bufsize", &channel_size_str[BIDIRECTIONAL] }, { "lossLR", &channel_size_str[LEFT_TO_RIGHT] }, { "lossRL", &channel_size_str[RIGHT_TO_LEFT] },
 		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
 		{ "bandwidth", &bandwidth_str[BIDIRECTIONAL] }, { "bandwidthLR", &bandwidth_str[LEFT_TO_RIGHT] }, { "bandwidthRL", &bandwidth_str[RIGHT_TO_LEFT] },
+		{ "speed", &speed_str[BIDIRECTIONAL] }, { "speedLR", &speed_str[LEFT_TO_RIGHT] }, { "speedRL", &speed_str[RIGHT_TO_LEFT] },
 		{ NULL, NULL }
 	};
 
@@ -141,6 +144,8 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	newconn->queue.max_forward_time = 0;
 	newconn->queue.counter = 0;
 
+	newconn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
+
 
 	markov_init(newconn);
 	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str[BIDIRECTIONAL], delay_str[LEFT_TO_RIGHT], delay_str[RIGHT_TO_LEFT]);
@@ -150,6 +155,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, NULL, NULL);
 	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str[BIDIRECTIONAL], channel_size_str[LEFT_TO_RIGHT], channel_size_str[RIGHT_TO_LEFT]);
 	setWireValue(MARKOV_CURRENT(newconn), BANDWIDTH, bandwidth_str[BIDIRECTIONAL], bandwidth_str[LEFT_TO_RIGHT], bandwidth_str[RIGHT_TO_LEFT]);
+	setWireValue(MARKOV_CURRENT(newconn), SPEED, speed_str[BIDIRECTIONAL], speed_str[LEFT_TO_RIGHT], speed_str[RIGHT_TO_LEFT]);
 
 
 	if (blink_path_str) { 
@@ -203,6 +209,12 @@ static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int fla
 // Left to right
 static ssize_t vde_wirefilter_send(VDECONN *conn, const void *buf, size_t len, int flags) {
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
+	uint64_t now = now_ns();
+
+	// Speed handling
+	if (vde_conn->speed_next[LEFT_TO_RIGHT] > now) {
+		usleep( NS_TO_US(vde_conn->speed_next[LEFT_TO_RIGHT] - now) );
+	}
 
 	Packet *packet = malloc(sizeof(Packet));
 	if (__builtin_expect(packet == NULL, 0)) { goto error; }
@@ -258,11 +270,12 @@ static void *packetHandlerThread(void *param) {
 
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)param;
 	
-	const int POLL_SIZE = 3;
-	struct pollfd poll_fd[3] = {
+	const int POLL_SIZE = 4;
+	struct pollfd poll_fd[4] = {
 		{ .fd=vde_conn->send_pipefd[0], .events=POLLIN },	// Left to right packets
 		{ .fd=vde_datafd(vde_conn->conn), .events=POLLIN },	// Right to left packets
-		{ .fd=vde_conn->queue_timer, .events=POLLIN }		// Packet queue timer
+		{ .fd=vde_conn->queue_timer, .events=POLLIN },		// Packet queue timer
+		{ .fd=vde_conn->speed_timer, .events=POLLIN }		// Packet queue timer
 	};
 	int poll_ret;
 
@@ -270,6 +283,9 @@ static void *packetHandlerThread(void *param) {
 
 	unsigned char receive_buffer[VDE_ETHBUFSIZE];
 	ssize_t receive_length;
+
+	struct itimerspec disarm_timer = { { 0, 0 }, { 0, 0 } };
+	uint64_t now;
 
 
 	while(1) {
@@ -288,6 +304,14 @@ static void *packetHandlerThread(void *param) {
 
 			// A packet can be received from the nested plugin
 			if (poll_fd[1].revents & POLLIN) {
+				now = now_ns();
+
+				// Speed handling
+				if (vde_conn->speed_next[RIGHT_TO_LEFT] > now) {
+					poll_fd[1].events &= ~POLLIN; // Stop receiving packets
+					continue;
+				}
+
 				receive_length = vde_recv(vde_conn->conn, receive_buffer, VDE_ETHBUFSIZE, 0);
 				if (receive_length == 1) { continue; } // Discarded
 
@@ -304,7 +328,6 @@ static void *packetHandlerThread(void *param) {
 
 			// Time to send something
 			if (poll_fd[2].revents & POLLIN) {
-				struct itimerspec disarm_timer = { { 0, 0 }, { 0, 0 } };
 				timerfd_settime(vde_conn->queue_timer, 0, &disarm_timer, NULL);
 
 				Packet *packet;
@@ -321,6 +344,12 @@ static void *packetHandlerThread(void *param) {
 				}
 			}
 			
+			// Packets reception (right to left) can be restored
+			if (poll_fd[2].revents & POLLIN) {
+				timerfd_settime(vde_conn->speed_timer, 0, &disarm_timer, NULL);
+				poll_fd[1].events |= POLLIN; // Restart receiving packets
+			}
+
 		}
 	}
 
@@ -340,6 +369,7 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 
 		if (bufferSizeHandler(vde_conn, packet) == DROP) { return; }
 
+		delay_ms += speedHandler(vde_conn, packet);
 		delay_ms += bandwidthHandler(vde_conn, packet);
 		delay_ms += delayHandler(vde_conn, packet);
 
@@ -454,24 +484,41 @@ static double bandwidthHandler(struct vde_wirefilter_conn *vde_conn, const Packe
 
 	if (maxWireValue(MARKOV_CURRENT(vde_conn), BANDWIDTH, packet->direction) > 0) {
 		double bandwidth = computeWireValue(MARKOV_CURRENT(vde_conn), BANDWIDTH, packet->direction);
-
 		if (bandwidth <= 0) { return DROP; }
-		if (bandwidth > 0) {
-			double send_time_ms = (packet->len*1000) / bandwidth;
-			uint64_t now = now_ns();
 
-			if (now > vde_conn->bandwidth_next[packet->direction]) {
-				// Bandwidth is still below the limit, delay this one to keep the bandwidth up to the limit
-				vde_conn->bandwidth_next[packet->direction] = now;
-				delay_ms = send_time_ms;
-			} else {
-				// Bandwidth is overflowing, delay this one until the next bandwidth timestamp 
-				double diff = NS_TO_MS( vde_conn->bandwidth_next[packet->direction] - now );
-				delay_ms = diff + send_time_ms;
-			}
+		double send_time_ms = (packet->len*1000) / bandwidth;
+		uint64_t now = now_ns();
 
-			vde_conn->bandwidth_next[packet->direction] += MS_TO_NS(send_time_ms);
+		if (now > vde_conn->bandwidth_next[packet->direction]) {
+			// Bandwidth is still below the limit, delay this one to keep the bandwidth up to the limit
+			vde_conn->bandwidth_next[packet->direction] = now;
+			delay_ms = send_time_ms;
+		} else {
+			// Bandwidth is overflowing, delay this one until the next bandwidth timestamp 
+			double diff = NS_TO_MS( vde_conn->bandwidth_next[packet->direction] - now );
+			delay_ms = diff + send_time_ms;
 		}
+		vde_conn->bandwidth_next[packet->direction] += MS_TO_NS(send_time_ms);
+	}
+
+	return delay_ms;
+}
+
+static double speedHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
+	double delay_ms = 0;
+
+	if (maxWireValue(MARKOV_CURRENT(vde_conn), SPEED, packet->direction) > 0) {
+		double speed = computeWireValue(MARKOV_CURRENT(vde_conn), SPEED, packet->direction);
+		if (speed <= 0) { return DROP; };
+
+		double send_time_ms = (packet->len*1000) / speed;
+		uint64_t now = now_ns();
+
+		delay_ms = send_time_ms;
+		if (now > vde_conn->speed_next[packet->direction]) {
+			vde_conn->speed_next[packet->direction] = now;
+		}
+		vde_conn->speed_next[packet->direction] += MS_TO_NS(send_time_ms);
 	}
 
 	return delay_ms;
