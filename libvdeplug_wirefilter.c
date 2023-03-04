@@ -81,28 +81,28 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	struct vde_wirefilter_conn *newconn = NULL;
 	VDECONN *conn;
 	char *nested_vnl;
-	char *delay_str[3] = { NULL, NULL, NULL };
-	char *dup_str[3] = { NULL, NULL, NULL };
-	char *loss_str[3] = { NULL, NULL, NULL };
+	char *delay_str = NULL;
+	char *dup_str = NULL;
+	char *loss_str = NULL;
 	char *bursty_loss_str = NULL;
 	char *mtu_str = NULL;
 	char *nofifo_str = NULL;
-	char *channel_size_str[3] = { NULL, NULL, NULL };
+	char *channel_size_str = NULL;
 	char *blink_path_str = NULL;
 	char *blink_id_str = NULL;
-	char *bandwidth_str[3] = { NULL, NULL, NULL };
-	char *speed_str[3] = { NULL, NULL, NULL };
+	char *bandwidth_str = NULL;
+	char *speed_str = NULL;
 	struct vdeparms parms[] = {
-		{ "delay", &delay_str[BIDIRECTIONAL] }, { "delayLR", &delay_str[LEFT_TO_RIGHT] }, { "delayRL", &delay_str[RIGHT_TO_LEFT] },
-		{ "dup", &dup_str[BIDIRECTIONAL] }, { "dupLR", &dup_str[LEFT_TO_RIGHT] }, { "dupRL", &dup_str[RIGHT_TO_LEFT] },
-		{ "loss", &loss_str[BIDIRECTIONAL] }, { "lossLR", &loss_str[LEFT_TO_RIGHT] }, { "lossRL", &loss_str[RIGHT_TO_LEFT] },
+		{ "delay", &delay_str },
+		{ "dup", &dup_str },
+		{ "loss", &loss_str },
 		{ "lostburst", &bursty_loss_str },
 		{ "mtu", &mtu_str },
 		{ "nofifo", &nofifo_str },
-		{ "bufsize", &channel_size_str[BIDIRECTIONAL] }, { "lossLR", &channel_size_str[LEFT_TO_RIGHT] }, { "lossRL", &channel_size_str[RIGHT_TO_LEFT] },
+		{ "bufsize", &channel_size_str },
 		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
-		{ "bandwidth", &bandwidth_str[BIDIRECTIONAL] }, { "bandwidthLR", &bandwidth_str[LEFT_TO_RIGHT] }, { "bandwidthRL", &bandwidth_str[RIGHT_TO_LEFT] },
-		{ "speed", &speed_str[BIDIRECTIONAL] }, { "speedLR", &speed_str[LEFT_TO_RIGHT] }, { "speedRL", &speed_str[RIGHT_TO_LEFT] },
+		{ "bandwidth", &bandwidth_str },
+		{ "speed", &speed_str },
 		{ NULL, NULL }
 	};
 
@@ -148,14 +148,14 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 
 
 	markov_init(newconn);
-	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str[BIDIRECTIONAL], delay_str[LEFT_TO_RIGHT], delay_str[RIGHT_TO_LEFT]);
-	setWireValue(MARKOV_CURRENT(newconn), DUP, dup_str[BIDIRECTIONAL], dup_str[LEFT_TO_RIGHT], dup_str[RIGHT_TO_LEFT]);
-	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str[BIDIRECTIONAL], loss_str[LEFT_TO_RIGHT], loss_str[RIGHT_TO_LEFT]);
-	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, NULL, NULL);
-	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, NULL, NULL);
-	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str[BIDIRECTIONAL], channel_size_str[LEFT_TO_RIGHT], channel_size_str[RIGHT_TO_LEFT]);
-	setWireValue(MARKOV_CURRENT(newconn), BANDWIDTH, bandwidth_str[BIDIRECTIONAL], bandwidth_str[LEFT_TO_RIGHT], bandwidth_str[RIGHT_TO_LEFT]);
-	setWireValue(MARKOV_CURRENT(newconn), SPEED, speed_str[BIDIRECTIONAL], speed_str[LEFT_TO_RIGHT], speed_str[RIGHT_TO_LEFT]);
+	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), DUP, dup_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), BANDWIDTH, bandwidth_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), SPEED, speed_str, 0);
 
 
 	if (blink_path_str) { 

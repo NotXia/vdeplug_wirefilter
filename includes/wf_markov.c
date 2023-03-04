@@ -133,21 +133,46 @@ static void setNodeValue(MarkovNode *node, int tag, int direction, double value,
  * Sets the tag's value of a node given the values as strings
  * If the value of a specific direction is given, it will be set in place of the bidirectional value (only for that direction).
 */
-void setWireValue(MarkovNode *node, int tag, char *bidirectional_value_str, char *lr_value_str, char *rl_value_str) {
+void setWireValue(MarkovNode *node, int tag, char *value_str, int flags) {
 	double value = 0, plus = 0;
 	char algorithm = ALGO_UNIFORM;
+	char *value_end;
+	char old_char;
+	char direction = BIDIRECTIONAL;
 
-	if (parseWireValueString(bidirectional_value_str, &value, &plus, &algorithm) != -1) {
-		setNodeValue(node, tag, LEFT_TO_RIGHT, value, plus, algorithm);
-		setNodeValue(node, tag, RIGHT_TO_LEFT, value, plus, algorithm);
-	}
+	while (value_str && *value_str != '\0') {
+		// Determines the direction to set
+		if ((*value_str == 'L' || *value_str == 'l') && (*(value_str+1) == 'R' || *(value_str+1) == 'r')) {
+			value_str += 2;
+			direction = LEFT_TO_RIGHT;
+		}
+		else if ((*value_str == 'R' || *value_str == 'r') && (*(value_str+1) == 'L' || *(value_str+1) == 'l')) {
+			value_str += 2;
+			direction = RIGHT_TO_LEFT;
+		}
+		else {
+			direction = BIDIRECTIONAL;
+		}
 
-	if (parseWireValueString(lr_value_str, &value, &plus, &algorithm) != -1) {
-		setNodeValue(node, tag, LEFT_TO_RIGHT, value, plus, algorithm);
-	}
+		// Finds the end of the argument
+		value_end = value_str;
+		while (*value_end != ' ' && *value_end != '\0') { value_end++; }
+		old_char = *value_end;
+		*value_end = '\0';
 
-	if (parseWireValueString(rl_value_str, &value, &plus, &algorithm) != -1) {
-		setNodeValue(node, tag, RIGHT_TO_LEFT, value, plus, algorithm);
+		// Parses the value
+		parseWireValueString(value_str, &value, &plus, &algorithm);
+		if (direction == LEFT_TO_RIGHT || direction == BIDIRECTIONAL) {
+			setNodeValue(node, tag, LEFT_TO_RIGHT, value, plus, algorithm);
+		}
+		if (direction == RIGHT_TO_LEFT || direction == BIDIRECTIONAL) {
+			setNodeValue(node, tag, RIGHT_TO_LEFT, value, plus, algorithm);
+		}
+
+		// Moves to the next argument
+		*value_end = old_char;
+		value_str = value_end;
+		while (*value_str == ' ' && *value_str != '\0') { value_str++; }
 	}
 }
 
