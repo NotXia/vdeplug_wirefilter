@@ -152,8 +152,8 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), DUP, dup_str, 0);
 	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str, 0);
 	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, WIRE_BIDIRECTIONAL);
+	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str, WIRE_BIDIRECTIONAL);
 	setWireValue(MARKOV_CURRENT(newconn), BANDWIDTH, bandwidth_str, 0);
 	setWireValue(MARKOV_CURRENT(newconn), SPEED, speed_str, 0);
 

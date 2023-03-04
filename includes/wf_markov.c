@@ -153,6 +153,7 @@ void setWireValue(MarkovNode *node, int tag, char *value_str, int flags) {
 		else {
 			direction = BIDIRECTIONAL;
 		}
+		if (flags & WIRE_BIDIRECTIONAL) { direction = BIDIRECTIONAL; }
 
 		// Finds the end of the argument
 		value_end = value_str;
