@@ -59,8 +59,8 @@ struct vdeplug_module vdeplug_ops = {
 };
 
 static void *packetHandlerThread(void *param);
-static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet);
-static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
+static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
+static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet);
 
 static char mtuHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static char lossHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
@@ -69,7 +69,7 @@ static char bufferSizeHandler(struct vde_wirefilter_conn *vde_conn, const Packet
 static double bandwidthHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static double speedHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static double delayHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
-
+static Packet *noiseHandler(struct vde_wirefilter_conn *vde_conn, Packet *packet);
 
 static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path);
 static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id);
@@ -92,6 +92,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *blink_id_str = NULL;
 	char *bandwidth_str = NULL;
 	char *speed_str = NULL;
+	char *noise_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str },
 		{ "dup", &dup_str },
@@ -103,6 +104,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
 		{ "bandwidth", &bandwidth_str },
 		{ "speed", &speed_str },
+		{ "noise", &noise_str },
 		{ NULL, NULL }
 	};
 
@@ -156,6 +158,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str, WIRE_BIDIRECTIONAL);
 	setWireValue(MARKOV_CURRENT(newconn), BANDWIDTH, bandwidth_str, 0);
 	setWireValue(MARKOV_CURRENT(newconn), SPEED, speed_str, 0);
+	setWireValue(MARKOV_CURRENT(newconn), NOISE, noise_str, 0);
 
 
 	if (blink_path_str) { 
@@ -336,7 +339,6 @@ static void *packetHandlerThread(void *param) {
 				while(vde_conn->queue.size > 0 && nextQueueTime(vde_conn) < now_ns()) {
 					packet = dequeue(vde_conn);
 					sendPacket(vde_conn, packet);
-					free(packet);
 				}
 
 				// Sets the timer for the next packet
@@ -358,7 +360,7 @@ static void *packetHandlerThread(void *param) {
 }
 
 
-static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
+static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
 	if (mtuHandler(vde_conn, packet) == DROP) { return; }
 	if (lossHandler(vde_conn, packet) == DROP) { return; }
 
@@ -366,29 +368,30 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 	int send_times = 1 + duplicatesHandler(vde_conn, packet);
 
 	for (int i=0; i<send_times; i++) {
+		Packet *to_send = packetCopy(packet);
 		delay_ms = 0;
 
-		if (bufferSizeHandler(vde_conn, packet) == DROP) { return; }
+		if (bufferSizeHandler(vde_conn, to_send) == DROP) { return; }
 
-		delay_ms += speedHandler(vde_conn, packet);
-		delay_ms += bandwidthHandler(vde_conn, packet);
-		delay_ms += delayHandler(vde_conn, packet);
+		delay_ms += speedHandler(vde_conn, to_send);
+		delay_ms += bandwidthHandler(vde_conn, to_send);
+		delay_ms += delayHandler(vde_conn, to_send);
+
+		noiseHandler(vde_conn, to_send);
 
 		if (delay_ms > 0) {
-			Packet *packet_copy = packetCopy(packet);
-
-			enqueue(vde_conn, packet_copy, now_ns() + MS_TO_NS(delay_ms));
+			enqueue(vde_conn, to_send, now_ns() + MS_TO_NS(delay_ms));
 			setQueueTimer(vde_conn);
 		}
 		else {
-			sendPacket(vde_conn, packet);
+			sendPacket(vde_conn, to_send);
 		}
 	}
 }
 
 
 /* Sends the packet to the correct destination */
-static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
+static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 	if (vde_conn->blink.socket_fd) {
 		char *message_content = vde_conn->blink.message + (vde_conn->blink.id_len+1); // Skip id and blank
 		
@@ -409,6 +412,8 @@ static void sendPacket(struct vde_wirefilter_conn *vde_conn, const Packet *packe
 		rw_len = write(vde_conn->receive_pipefd[1], packet->buf, packet->len);
 		if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
 	}
+
+	free(packet);
 }
 
 
@@ -537,6 +542,24 @@ static double delayHandler(struct vde_wirefilter_conn *vde_conn, const Packet *p
 	}
 
 	return delay_ms;
+}
+
+static Packet *noiseHandler(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
+	if (maxWireValue(MARKOV_CURRENT(vde_conn), NOISE, packet->direction) > 0) {
+		double noise = computeWireValue(MARKOV_CURRENT(vde_conn), NOISE, packet->direction);
+		int broken_bits = 0;
+		
+		// Determines the number of broken bits
+		while ((drand48()*8*MEGA) < (packet->len-2)*8*noise) { broken_bits++; }
+		
+		// Breaks the packet
+		for (int i=0; i<broken_bits; i++) {
+			int to_flip_bit = drand48() * packet->len*8;
+			((char*)packet->buf)[(to_flip_bit >> 3) + 2] ^= 1<<(to_flip_bit & 0x7);
+		}
+	} 
+
+	return packet;
 }
 
 

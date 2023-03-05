@@ -8,14 +8,6 @@
 #define ADJMAPN(M, I, J, N) (M)[(I)*(N)+(J)]
 #define ADJMAP(vde_conn, I, J) ADJMAPN((vde_conn)->markov.adjacency, (I), (J), (vde_conn)->markov.nodes_count)
 
-#define ALGO_UNIFORM      0
-#define ALGO_GAUSS_NORMAL 1
-#define SIGMA (1.0/3.0) // more than 98% inside the bell
-
-#define KILO (1<<10)
-#define MEGA (1<<20)
-#define GIGA (1<<30)
-
 
 void markov_init(struct vde_wirefilter_conn *vde_conn) {
 	markov_resize(vde_conn, 1);

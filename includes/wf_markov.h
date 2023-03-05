@@ -10,12 +10,21 @@
 #define CHANBUFSIZE 5
 #define BANDWIDTH 6
 #define SPEED 7
-#define MARKOV_NODE_VALUES 8
+#define NOISE 8
+#define MARKOV_NODE_VALUES 9
 
 #define MARKOV_GET_NODE(vde_conn, node) (vde_conn)->markov.nodes[(node)]
 #define MARKOV_CURRENT(vde_conn) 		MARKOV_GET_NODE(vde_conn, (vde_conn)->markov.current_node)
 
 #define WIRE_BIDIRECTIONAL 		0x1
+
+#define ALGO_UNIFORM      0
+#define ALGO_GAUSS_NORMAL 1
+#define SIGMA (1.0/3.0) // more than 98% inside the bell
+
+#define KILO (1<<10)
+#define MEGA (1<<20)
+#define GIGA (1<<30)
 
 
 typedef struct {
