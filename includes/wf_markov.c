@@ -141,6 +141,10 @@ void setWireValue(MarkovNode *node, int tag, char *value_str, int flags) {
 	char direction = BIDIRECTIONAL;
 
 	while (value_str && *value_str != '\0') {
+		// Left trim
+		while ((*value_str == ' ' || *value_str == '\n' || *value_str == '\t') && *value_str != '\0') { value_str++; }
+		if (*value_str == '\0') { break; }
+
 		// Determines the direction to set
 		if ((*value_str == 'L' || *value_str == 'l') && (*(value_str+1) == 'R' || *(value_str+1) == 'r')) {
 			value_str += 2;
@@ -170,10 +174,9 @@ void setWireValue(MarkovNode *node, int tag, char *value_str, int flags) {
 			setNodeValue(node, tag, RIGHT_TO_LEFT, value, plus, algorithm);
 		}
 
-		// Moves to the next argument
+		// Restores the string
 		*value_end = old_char;
 		value_str = value_end;
-		while (*value_str == ' ' && *value_str != '\0') { value_str++; }
 	}
 }
 
