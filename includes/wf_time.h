@@ -6,5 +6,6 @@
 #define NS_TO_US(ns) ((ns) / 1000)
 
 uint64_t now_ns();
+void setTimer(int timefd, uint64_t time);
 
 #endif

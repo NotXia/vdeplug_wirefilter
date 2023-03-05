@@ -309,6 +309,7 @@ static void *packetHandlerThread(void *param) {
 				// Speed handling
 				if (vde_conn->speed_next[RIGHT_TO_LEFT] > now) {
 					poll_fd[1].events &= ~POLLIN; // Stop receiving packets
+					setTimer(vde_conn->speed_timer, (vde_conn->speed_next[RIGHT_TO_LEFT] - now));
 					continue;
 				}
 
@@ -340,12 +341,12 @@ static void *packetHandlerThread(void *param) {
 
 				// Sets the timer for the next packet
 				if (vde_conn->queue.size > 0) {
-					setTimer(vde_conn);
+					setQueueTimer(vde_conn);
 				}
 			}
 			
 			// Packets reception (right to left) can be restored
-			if (poll_fd[2].revents & POLLIN) {
+			if (poll_fd[3].revents & POLLIN) {
 				timerfd_settime(vde_conn->speed_timer, 0, &disarm_timer, NULL);
 				poll_fd[1].events |= POLLIN; // Restart receiving packets
 			}
@@ -377,7 +378,7 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 			Packet *packet_copy = packetCopy(packet);
 
 			enqueue(vde_conn, packet_copy, now_ns() + MS_TO_NS(delay_ms));
-			setTimer(vde_conn);
+			setQueueTimer(vde_conn);
 		}
 		else {
 			sendPacket(vde_conn, packet);

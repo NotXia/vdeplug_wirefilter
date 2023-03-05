@@ -1,7 +1,6 @@
 #include "./wf_queue.h"
 #include "./wf_conn.h"
 #include "./wf_time.h"
-#include <sys/timerfd.h>
 #include <stdlib.h>
 
 #define QUEUE_CHUNK 100
@@ -125,13 +124,9 @@ uint64_t nextQueueTime(struct vde_wirefilter_conn *vde_conn) {
 
 
 /* Sets the timerfd for the next packet to send */
-void setTimer(struct vde_wirefilter_conn *vde_conn) {
+void setQueueTimer(struct vde_wirefilter_conn *vde_conn) {
 	int64_t next_time_step = nextQueueTime(vde_conn) - now_ns();
 	if (next_time_step <= 0) next_time_step = 1;
 
-	time_t seconds = next_time_step / (1000000000);
-	long nseconds = next_time_step % (1000000000);
-	struct itimerspec next = { { 0, 0 }, { seconds, nseconds } };
-	
-	timerfd_settime(vde_conn->queue_timer, 0, &next, NULL);
+	setTimer(vde_conn->queue_timer, next_time_step);
 }

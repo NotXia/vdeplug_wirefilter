@@ -20,6 +20,6 @@ void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, uint64_t forw
 Packet *dequeue(struct vde_wirefilter_conn *vde_conn);
 uint64_t nextQueueTime(struct vde_wirefilter_conn *vde_conn);
 
-void setTimer(struct vde_wirefilter_conn *vde_conn);
+void setQueueTimer(struct vde_wirefilter_conn *vde_conn);
 
 #endif
