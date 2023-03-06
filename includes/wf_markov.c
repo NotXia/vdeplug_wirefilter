@@ -4,14 +4,17 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "./wf_time.h"
+#include <sys/timerfd.h>
 
 #define ADJMAPN(M, I, J, N) (M)[(I)*(N)+(J)]
 #define ADJMAP(vde_conn, I, J) ADJMAPN((vde_conn)->markov.adjacency, (I), (J), (vde_conn)->markov.nodes_count)
 
-
 void markov_init(struct vde_wirefilter_conn *vde_conn) {
 	markov_resize(vde_conn, 1);
 	vde_conn->markov.current_node = 0;
+	vde_conn->markov.timerfd = timerfd_create(CLOCK_REALTIME, 0);
+	vde_conn->markov.change_frequency = MS_TO_NS(100);
 }
 
 static void copyAdjacency(struct vde_wirefilter_conn *vde_conn, int new_size, double *new_map) {
@@ -65,6 +68,26 @@ void markov_resize(struct vde_wirefilter_conn *vde_conn, int new_nodes_count) {
 	if (vde_conn->markov.adjacency) { free(vde_conn->markov.adjacency); }
 	vde_conn->markov.adjacency = new_adjacency_map;
 	vde_conn->markov.nodes_count = new_nodes_count;
+}
+
+
+void markov_step(struct vde_wirefilter_conn *vde_conn, const int start_node) {
+	double probability = drand48() * 100;
+	int new_node = 0;
+	
+	for (int j=0; j<vde_conn->markov.nodes_count; j++) {
+		new_node = (start_node + j) % vde_conn->markov.nodes_count;
+		double change_probability = ADJMAP(vde_conn, start_node, new_node);
+		
+		if (change_probability >= probability) {
+			break;
+		}
+		else {
+			probability -= change_probability;
+		}
+	}
+
+	vde_conn->markov.current_node = new_node;
 }
 
 

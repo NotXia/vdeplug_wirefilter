@@ -43,6 +43,7 @@ struct vde_wirefilter_conn;
 
 void markov_init(struct vde_wirefilter_conn *vde_conn);
 void markov_resize(struct vde_wirefilter_conn *vde_conn, int new_nodes_count);
+void markov_step(struct vde_wirefilter_conn *vde_conn, const int start_node);
 
 void setWireValue(MarkovNode *node, int tag, char *value_str, int flags);
 double maxWireValue(MarkovNode *node, int tag, int direction);

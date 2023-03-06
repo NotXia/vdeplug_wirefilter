@@ -273,12 +273,13 @@ static void *packetHandlerThread(void *param) {
 
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)param;
 	
-	const int POLL_SIZE = 4;
-	struct pollfd poll_fd[4] = {
+	const int POLL_SIZE = 5;
+	struct pollfd poll_fd[5] = {
 		{ .fd=vde_conn->send_pipefd[0], .events=POLLIN },	// Left to right packets
 		{ .fd=vde_datafd(vde_conn->conn), .events=POLLIN },	// Right to left packets
 		{ .fd=vde_conn->queue_timer, .events=POLLIN },		// Packet queue timer
-		{ .fd=vde_conn->speed_timer, .events=POLLIN }		// Packet queue timer
+		{ .fd=vde_conn->speed_timer, .events=POLLIN },		// Packet queue timer
+		{ .fd=vde_conn->markov.timerfd, .events=POLLIN }	// Markov chain state change
 	};
 	int poll_ret;
 
@@ -289,6 +290,10 @@ static void *packetHandlerThread(void *param) {
 
 	struct itimerspec disarm_timer = { { 0, 0 }, { 0, 0 } };
 	uint64_t now;
+
+
+	// Starts Markov timer
+	setTimer(vde_conn->markov.timerfd, vde_conn->markov.change_frequency);
 
 
 	while(1) {
@@ -351,6 +356,12 @@ static void *packetHandlerThread(void *param) {
 			if (poll_fd[3].revents & POLLIN) {
 				timerfd_settime(vde_conn->speed_timer, 0, &disarm_timer, NULL);
 				poll_fd[1].events |= POLLIN; // Restart receiving packets
+			}
+
+			// Time to change markov chain state
+			if (poll_fd[4].revents & POLLIN) {
+				setTimer(vde_conn->markov.timerfd, vde_conn->markov.change_frequency);
+				markov_step(vde_conn, vde_conn->markov.current_node);
 			}
 
 		}

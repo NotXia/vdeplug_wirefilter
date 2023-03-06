@@ -61,6 +61,9 @@ struct vde_wirefilter_conn {
 		int current_node;
 		int nodes_count;
 		double *adjacency;
+
+		uint64_t change_frequency; // Time (in ns) after which the state will change
+		int timerfd;
 	} markov;
 
 	struct {
