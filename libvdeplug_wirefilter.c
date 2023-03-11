@@ -93,7 +93,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *bandwidth_str = NULL;
 	char *speed_str = NULL;
 	char *noise_str = NULL;
-	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL;
+	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL, *markov_start_node_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str },
 		{ "dup", &dup_str },
@@ -107,6 +107,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "speed", &speed_str },
 		{ "noise", &noise_str },
 		{ "markov-numnodes", &markov_num_nodes_str }, { "markov-edges", &markov_edges_str }, { "markov-time", &markov_time_str },
+		{ "markov-setnode", &markov_start_node_str },
 		{ NULL, NULL }
 	};
 
@@ -151,7 +152,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	newconn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
 
 
-	markov_init(newconn, atoi(markov_num_nodes_str), MS_TO_NS(markov_time_str ? atof(markov_time_str) : 100));
+	markov_init(newconn, atoi(markov_num_nodes_str), markov_start_node_str ? atoi(markov_start_node_str) : 0, MS_TO_NS(markov_time_str ? atof(markov_time_str) : 100));
 	markov_setEdges(newconn, markov_edges_str);
 	setWireValue(newconn, DELAY, delay_str, 0);
 	setWireValue(newconn, DUP, dup_str, 0);

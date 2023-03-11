@@ -11,9 +11,9 @@
 #define ADJMAPN(M, I, J, N) (M)[(I)*(N)+(J)]
 #define ADJMAP(vde_conn, I, J) ADJMAPN((vde_conn)->markov.adjacency, (I), (J), (vde_conn)->markov.nodes_count)
 
-void markov_init(struct vde_wirefilter_conn *vde_conn, int size, uint64_t change_frequency) {
+void markov_init(struct vde_wirefilter_conn *vde_conn, int size, int start_node, uint64_t change_frequency) {
 	markov_resize(vde_conn, size <= 0 ? 1 : size);
-	vde_conn->markov.current_node = 0;
+	vde_conn->markov.current_node = start_node;
 	vde_conn->markov.timerfd = timerfd_create(CLOCK_REALTIME, 0);
 	vde_conn->markov.change_frequency = change_frequency;
 }
