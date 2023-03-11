@@ -93,6 +93,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *bandwidth_str = NULL;
 	char *speed_str = NULL;
 	char *noise_str = NULL;
+	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str },
 		{ "dup", &dup_str },
@@ -105,6 +106,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "bandwidth", &bandwidth_str },
 		{ "speed", &speed_str },
 		{ "noise", &noise_str },
+		{ "markov-numnodes", &markov_num_nodes_str }, { "markov-edges", &markov_edges_str }, { "markov-time", &markov_time_str },
 		{ NULL, NULL }
 	};
 
@@ -149,16 +151,17 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	newconn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
 
 
-	markov_init(newconn);
-	setWireValue(MARKOV_CURRENT(newconn), DELAY, delay_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), DUP, dup_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), LOSS, loss_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), BURSTYLOSS, bursty_loss_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), MTU, mtu_str, WIRE_BIDIRECTIONAL);
-	setWireValue(MARKOV_CURRENT(newconn), CHANBUFSIZE, channel_size_str, WIRE_BIDIRECTIONAL);
-	setWireValue(MARKOV_CURRENT(newconn), BANDWIDTH, bandwidth_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), SPEED, speed_str, 0);
-	setWireValue(MARKOV_CURRENT(newconn), NOISE, noise_str, 0);
+	markov_init(newconn, atoi(markov_num_nodes_str), MS_TO_NS(markov_time_str ? atof(markov_time_str) : 100));
+	markov_setEdges(newconn, markov_edges_str);
+	setWireValue(newconn, DELAY, delay_str, 0);
+	setWireValue(newconn, DUP, dup_str, 0);
+	setWireValue(newconn, LOSS, loss_str, 0);
+	setWireValue(newconn, BURSTYLOSS, bursty_loss_str, 0);
+	setWireValue(newconn, MTU, mtu_str, WIRE_BIDIRECTIONAL);
+	setWireValue(newconn, CHANBUFSIZE, channel_size_str, WIRE_BIDIRECTIONAL);
+	setWireValue(newconn, BANDWIDTH, bandwidth_str, 0);
+	setWireValue(newconn, SPEED, speed_str, 0);
+	setWireValue(newconn, NOISE, noise_str, 0);
 
 
 	if (blink_path_str) { 

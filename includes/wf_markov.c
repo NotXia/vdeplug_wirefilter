@@ -6,15 +6,41 @@
 #include <string.h>
 #include "./wf_time.h"
 #include <sys/timerfd.h>
+#include "./wf_debug.h"
 
 #define ADJMAPN(M, I, J, N) (M)[(I)*(N)+(J)]
 #define ADJMAP(vde_conn, I, J) ADJMAPN((vde_conn)->markov.adjacency, (I), (J), (vde_conn)->markov.nodes_count)
 
-void markov_init(struct vde_wirefilter_conn *vde_conn) {
-	markov_resize(vde_conn, 1);
+void markov_init(struct vde_wirefilter_conn *vde_conn, int size, uint64_t change_frequency) {
+	markov_resize(vde_conn, size <= 0 ? 1 : size);
 	vde_conn->markov.current_node = 0;
 	vde_conn->markov.timerfd = timerfd_create(CLOCK_REALTIME, 0);
-	vde_conn->markov.change_frequency = MS_TO_NS(100);
+	vde_conn->markov.change_frequency = change_frequency;
+}
+
+static void markov_rebalance_node(struct vde_wirefilter_conn *vde_conn, int node) {
+	ADJMAP(vde_conn, node, node) = 100.0;
+
+	for (int i=1; i<vde_conn->markov.nodes_count; i++) {
+		ADJMAP(vde_conn, node, node) -= ADJMAP(vde_conn, node, (node + i) % vde_conn->markov.nodes_count);
+	}
+}
+
+void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str) {
+	int start_node, end_node;
+	double weight;
+
+	while (*edges_str != '\0') {
+		while ((*edges_str == ' ' || *edges_str == '\n' || *edges_str == '\t') && *edges_str != '\0') { edges_str++; }
+		if (*edges_str == '\0') { break; }
+
+		sscanf(edges_str, "%lf[%d][%d]", &weight, &start_node, &end_node);
+		ADJMAP(vde_conn, start_node, end_node) = weight;
+		markov_rebalance_node(vde_conn, start_node);
+
+		// Moves to the next edge value
+		while (*edges_str != ' ' && *edges_str != '\0') { edges_str++; }
+	}
 }
 
 static void copyAdjacency(struct vde_wirefilter_conn *vde_conn, int new_size, double *new_map) {
@@ -91,7 +117,7 @@ void markov_step(struct vde_wirefilter_conn *vde_conn, const int start_node) {
 }
 
 
-static int parseWireValueString(char* string, double *value, double *plus, char *algorithm) {
+static int parseWireValueString(char* string, double *value, double *plus, char *algorithm, int *to_set_node) {
 	if (!string) { return -1; }
 	int n = strlen(string) - 1;
 
@@ -99,8 +125,20 @@ static int parseWireValueString(char* string, double *value, double *plus, char 
 	*value = 0, *plus = 0;
 	*algorithm = ALGO_UNIFORM;
 	int multiplier = 1;
+	*to_set_node = 0;
 
 	while ((string[n] == ' ' || string[n] == '\n' || string[n] == '\t') && n > 0) { string[n--] = '\0'; }
+
+	// Reads Markov node
+	if (string[n] == ']') {
+		string[n--] = '\0';
+		while (string[n] != '[' && n > 0) { n--; }
+		if (string[n] != '[') { return -1; }
+
+		char *node_number_str = (&string[n]) + 1;
+		sscanf(node_number_str, "%d", to_set_node);
+		string[n] = '\0';
+	}
 
 	// Reads algorithm (if set)
 	switch (string[n]) {
@@ -148,12 +186,13 @@ static void setNodeValue(MarkovNode *node, int tag, int direction, double value,
  * Sets the tag's value of a node given the values as strings
  * If the value of a specific direction is given, it will be set in place of the bidirectional value (only for that direction).
 */
-void setWireValue(MarkovNode *node, int tag, char *value_str, int flags) {
+void setWireValue(struct vde_wirefilter_conn *vde_conn, int tag, char *value_str, int flags) {
 	double value = 0, plus = 0;
 	char algorithm = ALGO_UNIFORM;
 	char *value_end;
 	char old_char;
 	char direction = BIDIRECTIONAL;
+	int to_set_node = 0;
 
 	while (value_str && *value_str != '\0') {
 		// Left trim
@@ -181,12 +220,15 @@ void setWireValue(MarkovNode *node, int tag, char *value_str, int flags) {
 		*value_end = '\0';
 
 		// Parses the value
-		parseWireValueString(value_str, &value, &plus, &algorithm);
-		if (direction == LEFT_TO_RIGHT || direction == BIDIRECTIONAL) {
-			setNodeValue(node, tag, LEFT_TO_RIGHT, value, plus, algorithm);
-		}
-		if (direction == RIGHT_TO_LEFT || direction == BIDIRECTIONAL) {
-			setNodeValue(node, tag, RIGHT_TO_LEFT, value, plus, algorithm);
+		if (parseWireValueString(value_str, &value, &plus, &algorithm, &to_set_node) == 0) {
+			if (to_set_node < 0 || to_set_node >= vde_conn->markov.nodes_count) { return; }
+
+			if (direction == LEFT_TO_RIGHT || direction == BIDIRECTIONAL) {
+				setNodeValue(vde_conn->markov.nodes[to_set_node], tag, LEFT_TO_RIGHT, value, plus, algorithm);
+			}
+			if (direction == RIGHT_TO_LEFT || direction == BIDIRECTIONAL) {
+				setNodeValue(vde_conn->markov.nodes[to_set_node], tag, RIGHT_TO_LEFT, value, plus, algorithm);
+			}
 		}
 
 		// Restores the string
