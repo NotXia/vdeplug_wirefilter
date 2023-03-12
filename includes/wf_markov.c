@@ -34,7 +34,7 @@ void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str) {
 		while ((*edges_str == ' ' || *edges_str == '\n' || *edges_str == '\t') && *edges_str != '\0') { edges_str++; }
 		if (*edges_str == '\0') { break; }
 
-		sscanf(edges_str, "%lf[%d][%d]", &weight, &start_node, &end_node);
+		sscanf(edges_str, "%d,%d,%lf", &start_node, &end_node, &weight);
 		ADJMAP(vde_conn, start_node, end_node) = weight;
 		markov_rebalance_node(vde_conn, start_node);
 
