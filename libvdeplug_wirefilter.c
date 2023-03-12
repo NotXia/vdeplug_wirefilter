@@ -93,7 +93,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *bandwidth_str = NULL;
 	char *speed_str = NULL;
 	char *noise_str = NULL;
-	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL, *markov_start_node_str = NULL;
+	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL, *markov_start_node_str = NULL, *markov_names_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str },
 		{ "dup", &dup_str },
@@ -107,7 +107,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "speed", &speed_str },
 		{ "noise", &noise_str },
 		{ "markov-numnodes", &markov_num_nodes_str }, { "markov-edges", &markov_edges_str }, { "markov-time", &markov_time_str },
-		{ "markov-setnode", &markov_start_node_str },
+		{ "markov-setnode", &markov_start_node_str }, { "markov-name", &markov_names_str },
 		{ NULL, NULL }
 	};
 
@@ -159,6 +159,9 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	markov_init(newconn, num_nodes, start_node, update_frequency);
 	if (markov_edges_str) {
 		markov_setEdges(newconn, markov_edges_str);
+	}
+	if (markov_names_str) {
+		markov_setNames(newconn, markov_names_str);
 	}
 	
 	setWireValue(newconn, DELAY, delay_str, 0);

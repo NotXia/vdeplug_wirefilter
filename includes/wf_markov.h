@@ -45,6 +45,7 @@ struct vde_wirefilter_conn;
 
 void markov_init(struct vde_wirefilter_conn *vde_conn, int size, int start_node, uint64_t change_frequency);
 void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str);
+void markov_setNames(struct vde_wirefilter_conn *vde_conn, char *names_str);
 void markov_resize(struct vde_wirefilter_conn *vde_conn, int new_nodes_count);
 void markov_step(struct vde_wirefilter_conn *vde_conn, const int start_node);
 

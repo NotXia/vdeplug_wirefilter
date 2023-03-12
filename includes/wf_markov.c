@@ -43,6 +43,46 @@ void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str) {
 	}
 }
 
+/**
+ * Parses the string of names (note: names cannot contain spaces)
+ * Format: "node,name node,name node,name"
+*/
+void markov_setNames(struct vde_wirefilter_conn *vde_conn, char *names_str) {
+	int node;
+	char is_last = 0;
+	char *name_end = NULL;
+
+	while (*names_str != '\0') {
+		while ((*names_str == ' ' || *names_str == '\n' || *names_str == '\t') && *names_str != '\0') { names_str++; }
+		if (*names_str == '\0') { break; }
+		
+		// Determines the node to set
+		node = atoi(names_str);
+		
+		// Moves to the beginning of the name
+		while(*names_str != ',' && *names_str != '\0') { names_str++; }
+		if (*names_str == '\0') { break; }
+		names_str++;
+
+		// Finds the end of the name string
+		name_end = names_str;
+		while (*name_end != ' ' && *name_end != '\0') { name_end++; }
+		if (*name_end == '\0') { is_last = 1; } // To signal that this is the last parameter of the string
+		*name_end = '\0';
+
+		// Sets name
+		if (node < vde_conn->markov.nodes_count) {
+			if (vde_conn->markov.nodes[node]->name) { free(vde_conn->markov.nodes[node]->name); }
+			vde_conn->markov.nodes[node]->name = strdup(names_str);
+		}
+		
+		// Restores and repositions string
+		if (is_last) { break; } // Arrived at the end of the string
+		*name_end = ' ';
+		names_str = name_end + 1;
+	}
+}
+
 static void copyAdjacency(struct vde_wirefilter_conn *vde_conn, int new_size, double *new_map) {
 	for (int i=0; i<new_size; i++) {
 		// Begins with an edge to itself (the node is not connected to anything)
