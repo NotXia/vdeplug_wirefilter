@@ -152,8 +152,15 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	newconn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
 
 
-	markov_init(newconn, atoi(markov_num_nodes_str), markov_start_node_str ? atoi(markov_start_node_str) : 0, MS_TO_NS(markov_time_str ? atof(markov_time_str) : 100));
-	markov_setEdges(newconn, markov_edges_str);
+	int num_nodes = markov_num_nodes_str ? atoi(markov_num_nodes_str) : 1;
+	int start_node = markov_start_node_str ? atoi(markov_start_node_str) : 0;
+	uint64_t update_frequency = MS_TO_NS(markov_time_str ? atof(markov_time_str) : 100);
+
+	markov_init(newconn, num_nodes, start_node, update_frequency);
+	if (markov_edges_str) {
+		markov_setEdges(newconn, markov_edges_str);
+	}
+	
 	setWireValue(newconn, DELAY, delay_str, 0);
 	setWireValue(newconn, DUP, dup_str, 0);
 	setWireValue(newconn, LOSS, loss_str, 0);
