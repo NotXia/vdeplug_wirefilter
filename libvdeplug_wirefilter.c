@@ -33,6 +33,7 @@
 #include <wf_queue.h>
 #include <wf_time.h>
 #include <wf_markov.h>
+#include <wf_management.h>
 #include "./includes/wf_debug.h"
 
 
@@ -94,6 +95,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *speed_str = NULL;
 	char *noise_str = NULL;
 	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL, *markov_start_node_str = NULL, *markov_names_str = NULL;
+	char *management_socket_path = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str },
 		{ "dup", &dup_str },
@@ -108,6 +110,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "noise", &noise_str },
 		{ "markov-numnodes", &markov_num_nodes_str }, { "markov-edges", &markov_edges_str }, { "markov-time", &markov_time_str },
 		{ "markov-setnode", &markov_start_node_str }, { "markov-name", &markov_names_str },
+		{ "mgmt", &management_socket_path },
 		{ NULL, NULL }
 	};
 
@@ -129,11 +132,6 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	if ( pipe(newconn->send_pipefd) != 0 ) { goto error; } 
 	if ( pipe(newconn->receive_pipefd) != 0 ) { goto error; } 
 
-
-	// Starts packet handler thread
-	pthread_t packet_handler_thread;
-	if ( pthread_create(&packet_handler_thread, NULL, &packetHandlerThread, (void*)newconn) != 0 ) { goto error; };
-	newconn->packet_handler_thread = packet_handler_thread;
 
 	pthread_mutex_init(&newconn->receive_lock, NULL);
 
@@ -183,6 +181,22 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 
 	newconn->bandwidth_next[LEFT_TO_RIGHT] = 0;
 	newconn->bandwidth_next[RIGHT_TO_LEFT] = 0;
+
+
+	newconn->management.socket_fd = -1;
+
+	if (management_socket_path) {
+		newconn->management.mode = 0700;
+		newconn->management.connections_count = 0;
+		newconn->management.socket_name = management_socket_path;
+		if ( createManagementSocket(newconn, management_socket_path) < 0 ) { goto error; }
+	}
+
+
+	// Starts packet handler thread
+	pthread_t packet_handler_thread;
+	if ( pthread_create(&packet_handler_thread, NULL, &packetHandlerThread, (void*)newconn) != 0 ) { goto error; };
+	newconn->packet_handler_thread = packet_handler_thread;
 
 
 	return (VDECONN *)newconn;
@@ -275,26 +289,33 @@ static int vde_wirefilter_close(VDECONN *conn) {
 	close(vde_conn->receive_pipefd[1]);
 	close(vde_conn->queue_timer);
 	pthread_mutex_destroy(&vde_conn->receive_lock);
+	if (vde_conn->management.socket_fd > 0) {
+		remove(vde_conn->management.socket_name);
+	}
 	
 	int ret_value = vde_close(vde_conn->conn);
 	free(vde_conn);
 	return ret_value;
 }
 
+#define POLL_MNGM 5
 
 static void *packetHandlerThread(void *param) {
 	pthread_detach(pthread_self());
 
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)param;
 	
-	const int POLL_SIZE = 5;
-	struct pollfd poll_fd[5] = {
-		{ .fd=vde_conn->send_pipefd[0], .events=POLLIN },	// Left to right packets
-		{ .fd=vde_datafd(vde_conn->conn), .events=POLLIN },	// Right to left packets
-		{ .fd=vde_conn->queue_timer, .events=POLLIN },		// Packet queue timer
-		{ .fd=vde_conn->speed_timer, .events=POLLIN },		// Packet queue timer
-		{ .fd=vde_conn->markov.timerfd, .events=POLLIN }	// Markov chain state change
+	const int POLL_SIZE = 6+MNGM_MAX_CONN;
+	struct pollfd poll_fd[6+MNGM_MAX_CONN] = {
+		{ .fd=vde_conn->send_pipefd[0], .events=POLLIN },					// Left to right packets
+		{ .fd=vde_datafd(vde_conn->conn), .events=POLLIN },					// Right to left packets
+		{ .fd=vde_conn->queue_timer, .events=POLLIN },						// Packet queue timer
+		{ .fd=vde_conn->speed_timer, .events=POLLIN },						// Packet queue timer
+		{ .fd=vde_conn->markov.timerfd, .events=POLLIN },					// Markov chain state change
+		{ .fd=vde_conn->management.socket_fd, .events=POLLIN },				// Management socket
 	};
+	for (int i=1; i<=MNGM_MAX_CONN; i++) { poll_fd[POLL_MNGM + i].fd = -1; } // Management socket clients
+
 	int poll_ret;
 
 	ssize_t rw_len;
@@ -314,6 +335,7 @@ static void *packetHandlerThread(void *param) {
 		poll_ret = poll(poll_fd, POLL_SIZE, -1);
 
 		if (poll_ret > 0) {
+
 			// A packet has to be sent
 			if (poll_fd[0].revents & POLLIN) {
 				Packet *packet;
@@ -323,6 +345,7 @@ static void *packetHandlerThread(void *param) {
 				handlePacket(vde_conn, packet);
 				packetDestroy(packet);
 			}
+
 
 			// A packet can be received from the nested plugin
 			if (poll_fd[1].revents & POLLIN) {
@@ -349,6 +372,7 @@ static void *packetHandlerThread(void *param) {
 				packetDestroy(packet);
 			}
 
+
 			// Time to send something
 			if (poll_fd[2].revents & POLLIN) {
 				timerfd_settime(vde_conn->queue_timer, 0, &disarm_timer, NULL);
@@ -366,16 +390,43 @@ static void *packetHandlerThread(void *param) {
 				}
 			}
 			
+
 			// Packets reception (right to left) can be restored
 			if (poll_fd[3].revents & POLLIN) {
 				timerfd_settime(vde_conn->speed_timer, 0, &disarm_timer, NULL);
 				poll_fd[1].events |= POLLIN; // Restart receiving packets
 			}
 
+
 			// Time to change markov chain state
 			if (poll_fd[4].revents & POLLIN) {
 				setTimer(vde_conn->markov.timerfd, vde_conn->markov.change_frequency);
 				markov_step(vde_conn, vde_conn->markov.current_node);
+			}
+
+
+			// Management socket connection
+			if (poll_fd[POLL_MNGM].revents & POLLIN) {
+				int new_conn = acceptManagementConnection(vde_conn);
+				
+				if (new_conn > 0) {
+					poll_fd[POLL_MNGM + vde_conn->management.connections_count].fd = new_conn;
+					poll_fd[POLL_MNGM + vde_conn->management.connections_count].events = POLLIN | POLLHUP;
+				}
+			}
+
+			// Management socket command or hang-up
+			for (int i=1; i<=vde_conn->management.connections_count; i++) {
+				if (poll_fd[POLL_MNGM + i].revents & POLLIN) {
+					handleManagementCommand(vde_conn, poll_fd[POLL_MNGM + i].fd);
+				}
+
+				if (poll_fd[POLL_MNGM + i].revents & POLLHUP) {
+					close(poll_fd[POLL_MNGM + i].fd);
+					memmove(&poll_fd[POLL_MNGM+i], &poll_fd[POLL_MNGM+i+1], sizeof(struct pollfd) * (vde_conn->management.connections_count-i));
+					poll_fd[POLL_MNGM+vde_conn->management.connections_count].fd = -1;
+					vde_conn->management.connections_count--;
+				}
 			}
 
 		}

@@ -79,6 +79,13 @@ struct vde_wirefilter_conn {
 	uint64_t bandwidth_next[2];
 	uint64_t speed_next[2];
 	int speed_timer; // Timer to restart receiving packets during speed handling
+
+	struct {
+		int socket_fd;
+		int mode;
+		int connections_count;
+		char *socket_name;
+	} management;
 };
 
 Packet *packetCopy(const Packet *to_copy);
