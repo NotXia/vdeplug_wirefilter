@@ -95,7 +95,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *speed_str = NULL;
 	char *noise_str = NULL;
 	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL, *markov_start_node_str = NULL, *markov_names_str = NULL;
-	char *management_socket_path = NULL;
+	char *management_socket_path = NULL, *management_mode_str = NULL;
 	struct vdeparms parms[] = {
 		{ "delay", &delay_str },
 		{ "dup", &dup_str },
@@ -110,7 +110,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "noise", &noise_str },
 		{ "markov-numnodes", &markov_num_nodes_str }, { "markov-edges", &markov_edges_str }, { "markov-time", &markov_time_str },
 		{ "markov-setnode", &markov_start_node_str }, { "markov-name", &markov_names_str },
-		{ "mgmt", &management_socket_path },
+		{ "mgmt", &management_socket_path }, { "mgmtmode", &management_mode_str },
 		{ NULL, NULL }
 	};
 
@@ -187,6 +187,9 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 
 	if (management_socket_path) {
 		newconn->management.mode = 0700;
+		if (management_mode_str) {
+			sscanf(management_mode_str, "%o", &newconn->management.mode);
+		}
 		newconn->management.connections_count = 0;
 		newconn->management.socket_name = management_socket_path;
 		if ( createManagementSocket(newconn, management_socket_path) < 0 ) { goto error; }

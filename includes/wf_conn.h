@@ -82,7 +82,7 @@ struct vde_wirefilter_conn {
 
 	struct {
 		int socket_fd;
-		int mode;
+		unsigned int mode;
 		int connections_count;
 		char *socket_name;
 	} management;
