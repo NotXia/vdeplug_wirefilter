@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <stdarg.h>
+#include "./wf_markov.h"
 #include "./wf_debug.h"
 
 
@@ -71,23 +72,23 @@ static int print_mgmt(int fd, const char *format, ...) {
 }
 
 
-static int help(struct vde_wirefilter_conn *vde_conn, int fd,char *arg) {
+static int help(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	(void)vde_conn; (void)arg;
 	print_mgmt(fd, "COMMAND      HELP");
 	print_mgmt(fd, "------------ ------------");
 	print_mgmt(fd, "help         print a summary of mgmt commands");
 	// print_mgmt(fd, "load         load a configuration file");
 	// print_mgmt(fd, "showinfo     show status and parameter values");
-	// print_mgmt(fd, "loss         set loss percentage");
-	// print_mgmt(fd, "lostburst    mean length of lost packet bursts");
-	// print_mgmt(fd, "delay        set delay ms");
-	// print_mgmt(fd, "dup          set dup packet percentage");
-	// print_mgmt(fd, "bandwidth    set channel bandwidth bytes/sec");
-	// print_mgmt(fd, "speed        set interface speed bytes/sec");
-	// print_mgmt(fd, "noise        set noise factor bits/Mbyte");
-	// print_mgmt(fd, "mtu          set channel MTU (bytes)");
-	// print_mgmt(fd, "chanbufsize  set channel buffer size (bytes)");
-	// print_mgmt(fd, "fifo         set channel fifoness");
+	print_mgmt(fd, "loss         set loss percentage");
+	print_mgmt(fd, "lostburst    mean length of lost packet bursts");
+	print_mgmt(fd, "delay        set delay ms");
+	print_mgmt(fd, "dup          set dup packet percentage");
+	print_mgmt(fd, "bandwidth    set channel bandwidth bytes/sec");
+	print_mgmt(fd, "speed        set interface speed bytes/sec");
+	print_mgmt(fd, "noise        set noise factor bits/Mbyte");
+	print_mgmt(fd, "mtu          set channel MTU (bytes)");
+	print_mgmt(fd, "chanbufsize  set channel buffer size (bytes)");
+	print_mgmt(fd, "fifo         set channel fifoness");
 	// print_mgmt(fd, "shutdown     shut the channel down");
 	// print_mgmt(fd, "logout       log out from this mgmt session");
 	// print_mgmt(fd, "markov-numnodes n  markov mode: set number of states");
@@ -102,12 +103,83 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd,char *arg) {
 	return 0;
 }
 
+static int setLoss(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, LOSS, arg, 0);
+	return 0;
+}
+
+static int setBurstyLoss(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, BURSTYLOSS, arg, 0);
+	return 0;
+}
+
+static int setDelay(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, DELAY, arg, 0);
+	return 0;
+}
+
+static int setDuplicates(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, DUP, arg, 0);
+	return 0;
+}
+
+static int setBandwidth(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, BANDWIDTH, arg, 0);
+	return 0;
+}
+
+static int setSpeed(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, SPEED, arg, 0);
+	return 0;
+}
+
+static int setNoise(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, NOISE, arg, 0);
+	return 0;
+}
+
+static int setMTU(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, MTU, arg, WIRE_BIDIRECTIONAL);
+	return 0;
+}
+
+static int setChanbufsize(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	setWireValue(vde_conn, CHANBUFSIZE, arg, WIRE_BIDIRECTIONAL);
+	return 0;
+}
+
+static int setFIFO(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	vde_conn->fifoness = atoi(arg);
+	return 0;
+}
+
+
 static struct comlist {
 	char *tag;
-	int (*fun)(struct vde_wirefilter_conn *vde_conn, int fd,char *arg);
+	int (*fun)(struct vde_wirefilter_conn *vde_conn, int fd, char *arg);
 	unsigned char type;
 } commandlist [] = {
-	{ "help", help, WITHFILE }
+	{ "help", 			help, 			WITHFILE },
+	{ "loss", 			setLoss, 		0 },
+	{ "lostburst", 		setBurstyLoss,	0 },
+	{ "delay", 			setDelay, 		0 },
+	{ "dup", 			setDuplicates, 	0 },
+	{ "bandwidth", 		setBandwidth, 	0 },
+	{ "speed", 			setSpeed, 		0 },
+	{ "noise", 			setNoise, 		0 },
+	{ "mtu", 			setMTU, 		0 },
+	{ "chanbufsize", 	setChanbufsize,	0 },
+	{ "fifo", 			setFIFO,		0 }
 };
 #define NUM_COMMANDS ( (int)(sizeof(commandlist)/sizeof(struct comlist)) )
 
