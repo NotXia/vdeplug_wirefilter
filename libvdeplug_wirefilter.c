@@ -358,21 +358,22 @@ static void *packetHandlerThread(void *param) {
 				if (vde_conn->speed_next[RIGHT_TO_LEFT] > now) {
 					poll_fd[1].events &= ~POLLIN; // Stop receiving packets
 					setTimer(vde_conn->speed_timer, (vde_conn->speed_next[RIGHT_TO_LEFT] - now));
-					continue;
 				}
+				else {
+					receive_length = vde_recv(vde_conn->conn, receive_buffer, VDE_ETHBUFSIZE, 0);
+					
+					if (receive_length > 1) { // Not discarded packet
+						Packet *packet = malloc(sizeof(Packet));
+						packet->buf = malloc(receive_length);
+						memcpy(packet->buf, receive_buffer, receive_length);
+						packet->len = receive_length;
+						packet->flags = 0;
+						packet->direction = RIGHT_TO_LEFT;
 
-				receive_length = vde_recv(vde_conn->conn, receive_buffer, VDE_ETHBUFSIZE, 0);
-				if (receive_length == 1) { continue; } // Discarded
-
-				Packet *packet = malloc(sizeof(Packet));
-				packet->buf = malloc(receive_length);
-				memcpy(packet->buf, receive_buffer, receive_length);
-				packet->len = receive_length;
-				packet->flags = 0;
-				packet->direction = RIGHT_TO_LEFT;
-
-				handlePacket(vde_conn, packet);
-				packetDestroy(packet);
+						handlePacket(vde_conn, packet);
+						packetDestroy(packet);
+					}
+				}
 			}
 
 
@@ -382,7 +383,7 @@ static void *packetHandlerThread(void *param) {
 
 				Packet *packet;
 
-				while(vde_conn->queue.size > 0 && nextQueueTime(vde_conn) < now_ns()) {
+				while (vde_conn->queue.size > 0 && nextQueueTime(vde_conn) < now_ns()) {
 					packet = dequeue(vde_conn);
 					sendPacket(vde_conn, packet);
 				}
@@ -411,24 +412,29 @@ static void *packetHandlerThread(void *param) {
 			// Management socket connection
 			if (poll_fd[POLL_MNGM].revents & POLLIN) {
 				int new_conn = acceptManagementConnection(vde_conn);
-				
+
 				if (new_conn > 0) {
 					poll_fd[POLL_MNGM + vde_conn->management.connections_count].fd = new_conn;
 					poll_fd[POLL_MNGM + vde_conn->management.connections_count].events = POLLIN | POLLHUP;
 				}
 			}
 
-			// Management socket command or hang-up
+			// Management socket command
 			for (int i=1; i<=vde_conn->management.connections_count; i++) {
 				if (poll_fd[POLL_MNGM + i].revents & POLLIN) {
 					handleManagementCommand(vde_conn, poll_fd[POLL_MNGM + i].fd);
 				}
+			}
 
+			// Management socket hang-up
+			for (int i=1; i<=vde_conn->management.connections_count; i++) {
 				if (poll_fd[POLL_MNGM + i].revents & POLLHUP) {
 					close(poll_fd[POLL_MNGM + i].fd);
 					memmove(&poll_fd[POLL_MNGM+i], &poll_fd[POLL_MNGM+i+1], sizeof(struct pollfd) * (vde_conn->management.connections_count-i));
 					poll_fd[POLL_MNGM+vde_conn->management.connections_count].fd = -1;
+
 					vde_conn->management.connections_count--;
+					i--;
 				}
 			}
 

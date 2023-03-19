@@ -23,10 +23,10 @@ int createManagementSocket(struct vde_wirefilter_conn *vde_conn, char *socket_na
 	struct sockaddr_un sun;
 	int one = 1;
 
-	if ( (socket_fd = socket(PF_UNIX, SOCK_STREAM, 0)) < 0 ) { return -1; }
+	if ( (socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0 ) { return -1; }
 	if ( setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(one) ) < 0) { return -1; }
 	if ( fcntl(socket_fd, F_SETFL, O_NONBLOCK) < 0 ) { return -1; }
-	sun.sun_family = PF_UNIX;
+	sun.sun_family = AF_UNIX;
 	snprintf(sun.sun_path, sizeof(sun.sun_path), "%s", socket_name);
 
 	if ( bind(socket_fd, (struct sockaddr *)&sun, sizeof(sun)) < 0 ) { return -1; }
@@ -41,12 +41,9 @@ int createManagementSocket(struct vde_wirefilter_conn *vde_conn, char *socket_na
 
 int acceptManagementConnection(struct vde_wirefilter_conn *vde_conn) {
 	int new_connection;
-	unsigned int len;
 	char buf[MNGM_CMD_MAX_LEN];
-	struct sockaddr addr;
 
-	new_connection = accept(vde_conn->management.socket_fd, &addr, &len);
-
+	new_connection = accept(vde_conn->management.socket_fd, NULL, NULL);
 	if (new_connection < 0) { return -1; }
 	
 	if (vde_conn->management.connections_count < MNGM_MAX_CONN) {
@@ -79,29 +76,29 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd,char *arg) {
 	print_mgmt(fd, "COMMAND      HELP");
 	print_mgmt(fd, "------------ ------------");
 	print_mgmt(fd, "help         print a summary of mgmt commands");
-	print_mgmt(fd, "load         load a configuration file");
-	print_mgmt(fd, "showinfo     show status and parameter values");
-	print_mgmt(fd, "loss         set loss percentage");
-	print_mgmt(fd, "lostburst    mean length of lost packet bursts");
-	print_mgmt(fd, "delay        set delay ms");
-	print_mgmt(fd, "dup          set dup packet percentage");
-	print_mgmt(fd, "bandwidth    set channel bandwidth bytes/sec");
-	print_mgmt(fd, "speed        set interface speed bytes/sec");
-	print_mgmt(fd, "noise        set noise factor bits/Mbyte");
-	print_mgmt(fd, "mtu          set channel MTU (bytes)");
-	print_mgmt(fd, "chanbufsize  set channel buffer size (bytes)");
-	print_mgmt(fd, "fifo         set channel fifoness");
-	print_mgmt(fd, "shutdown     shut the channel down");
-	print_mgmt(fd, "logout       log out from this mgmt session");
-	print_mgmt(fd, "markov-numnodes n  markov mode: set number of states");
-	print_mgmt(fd, "markov-setnode n   markov mode: set current state");
-	print_mgmt(fd, "markov-name n,name markov mode: set state's name");
-	print_mgmt(fd, "markov-time ms     markov mode: transition period");
-	print_mgmt(fd, "setedge n1,n2,w    markov mode: set edge weight");
-	print_mgmt(fd, "showinfo n         markov mode: show parameter values");
-	print_mgmt(fd, "showedges n        markov mode: show edge weights");
-	print_mgmt(fd, "showcurrent        markov mode: show current state");
-	print_mgmt(fd, "markov-debug n     markov mode: set debug level");
+	// print_mgmt(fd, "load         load a configuration file");
+	// print_mgmt(fd, "showinfo     show status and parameter values");
+	// print_mgmt(fd, "loss         set loss percentage");
+	// print_mgmt(fd, "lostburst    mean length of lost packet bursts");
+	// print_mgmt(fd, "delay        set delay ms");
+	// print_mgmt(fd, "dup          set dup packet percentage");
+	// print_mgmt(fd, "bandwidth    set channel bandwidth bytes/sec");
+	// print_mgmt(fd, "speed        set interface speed bytes/sec");
+	// print_mgmt(fd, "noise        set noise factor bits/Mbyte");
+	// print_mgmt(fd, "mtu          set channel MTU (bytes)");
+	// print_mgmt(fd, "chanbufsize  set channel buffer size (bytes)");
+	// print_mgmt(fd, "fifo         set channel fifoness");
+	// print_mgmt(fd, "shutdown     shut the channel down");
+	// print_mgmt(fd, "logout       log out from this mgmt session");
+	// print_mgmt(fd, "markov-numnodes n  markov mode: set number of states");
+	// print_mgmt(fd, "markov-setnode n   markov mode: set current state");
+	// print_mgmt(fd, "markov-name n,name markov mode: set state's name");
+	// print_mgmt(fd, "markov-time ms     markov mode: transition period");
+	// print_mgmt(fd, "setedge n1,n2,w    markov mode: set edge weight");
+	// print_mgmt(fd, "showinfo n         markov mode: show parameter values");
+	// print_mgmt(fd, "showedges n        markov mode: show edge weights");
+	// print_mgmt(fd, "showcurrent        markov mode: show current state");
+	// print_mgmt(fd, "markov-debug n     markov mode: set debug level");
 	return 0;
 }
 
