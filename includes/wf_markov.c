@@ -8,8 +8,6 @@
 #include <sys/timerfd.h>
 #include "./wf_debug.h"
 
-#define ADJMAPN(M, I, J, N) (M)[(I)*(N)+(J)]
-#define ADJMAP(vde_conn, I, J) ADJMAPN((vde_conn)->markov.adjacency, (I), (J), (vde_conn)->markov.nodes_count)
 
 void markov_init(struct vde_wirefilter_conn *vde_conn, int size, int start_node, uint64_t change_frequency) {
 	markov_resize(vde_conn, size <= 0 ? 1 : size);

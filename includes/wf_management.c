@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <stdarg.h>
 #include "./wf_markov.h"
+#include "./wf_time.h"
 #include "./wf_debug.h"
 
 
@@ -91,14 +92,14 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	print_mgmt(fd, "fifo         set channel fifoness");
 	// print_mgmt(fd, "shutdown     shut the channel down");
 	// print_mgmt(fd, "logout       log out from this mgmt session");
-	// print_mgmt(fd, "markov-numnodes n  markov mode: set number of states");
-	// print_mgmt(fd, "markov-setnode n   markov mode: set current state");
-	// print_mgmt(fd, "markov-name n,name markov mode: set state's name");
-	// print_mgmt(fd, "markov-time ms     markov mode: transition period");
-	// print_mgmt(fd, "setedge n1,n2,w    markov mode: set edge weight");
+	print_mgmt(fd, "markov-numnodes n  markov mode: set number of states");
+	print_mgmt(fd, "markov-setnode n   markov mode: set current state");
+	print_mgmt(fd, "markov-name n,name markov mode: set state's name");
+	print_mgmt(fd, "markov-time ms     markov mode: transition period");
+	print_mgmt(fd, "setedge n1,n2,w    markov mode: set edge weight");
 	// print_mgmt(fd, "showinfo n         markov mode: show parameter values");
-	// print_mgmt(fd, "showedges n        markov mode: show edge weights");
-	// print_mgmt(fd, "showcurrent        markov mode: show current state");
+	print_mgmt(fd, "showedges n        markov mode: show edge weights");
+	print_mgmt(fd, "showcurrent        markov mode: show current state");
 	// print_mgmt(fd, "markov-debug n     markov mode: set debug level");
 	return 0;
 }
@@ -163,6 +164,71 @@ static int setFIFO(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	return 0;
 }
 
+static int markovSetNodeNumber(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	markov_resize(vde_conn, atoi(arg));
+	return 0;
+}
+
+static int markovSetCurrentNode(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	vde_conn->markov.current_node = atoi(arg);
+	return 0;
+}
+
+static int markovSetNodeName(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	markov_setNames(vde_conn, arg);
+	return 0;
+}
+
+static int markovSetTime(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	WF_DEBUG_PRINT(DEBUG_LOGS, "|%s| %lld %lld\n", arg, atoll(arg), MS_TO_NS(atoll(arg)));
+	vde_conn->markov.change_frequency = MS_TO_NS(atoll(arg));
+	setTimer(vde_conn->markov.timerfd, vde_conn->markov.change_frequency);
+	return 0;
+}
+
+static int markovSetEdge(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)fd;
+	markov_setEdges(vde_conn, arg);
+	return 0;
+}
+
+static int markovShowEdges(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	int to_explore_node = (*arg != 0) ? atoi(arg) : vde_conn->markov.current_node;
+	
+	if (to_explore_node < 0 || to_explore_node >= vde_conn->markov.nodes_count) {
+		return EINVAL;
+	}
+
+	for (int i=0; i<vde_conn->markov.nodes_count; i++) {
+		if (ADJMAP(vde_conn, to_explore_node, i) != 0) {
+			print_mgmt(
+				fd, "Edge (%-2d)->(%-2d) \"%s\"->\"%s\" weight %lg",
+				to_explore_node, i,
+				MARKOV_GET_NODE(vde_conn, to_explore_node)->name ? MARKOV_GET_NODE(vde_conn, to_explore_node)->name : "",
+				MARKOV_GET_NODE(vde_conn, i)->name ? MARKOV_GET_NODE(vde_conn, i)->name : "",
+				ADJMAP(vde_conn, to_explore_node, i)
+			);
+		}
+	} 
+
+	return 0;
+}
+
+static int markovShowCurrent(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)arg;
+	print_mgmt(
+		fd, "Current Markov Node %d \"%s\" (0,..,%d)", 
+		vde_conn->markov.current_node, 
+		MARKOV_CURRENT(vde_conn)->name ? MARKOV_CURRENT(vde_conn)->name : "",
+		vde_conn->markov.nodes_count-1
+	);
+	return 0;
+}
+
 
 static struct comlist {
 	char *tag;
@@ -179,7 +245,14 @@ static struct comlist {
 	{ "noise", 			setNoise, 		0 },
 	{ "mtu", 			setMTU, 		0 },
 	{ "chanbufsize", 	setChanbufsize,	0 },
-	{ "fifo", 			setFIFO,		0 }
+	{ "fifo", 			setFIFO,		0 },
+	{ "markov-numnodes", markovSetNodeNumber, 0 },
+	{ "markov-setnode", markovSetCurrentNode, 0 },
+	{ "markov-name", markovSetNodeName, 0 },
+	{ "markov-time", markovSetTime, 0 },
+	{ "setedge", markovSetEdge, 0 },
+	{ "showedges", markovShowEdges, WITHFILE },
+	{ "showcurrent", markovShowCurrent, WITHFILE },
 };
 #define NUM_COMMANDS ( (int)(sizeof(commandlist)/sizeof(struct comlist)) )
 

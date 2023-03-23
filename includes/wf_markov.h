@@ -15,6 +15,8 @@
 #define NOISE 8
 #define MARKOV_NODE_VALUES 9
 
+#define ADJMAPN(M, I, J, N) (M)[(I)*(N)+(J)]
+#define ADJMAP(vde_conn, I, J) ADJMAPN((vde_conn)->markov.adjacency, (I), (J), (vde_conn)->markov.nodes_count)
 #define MARKOV_GET_NODE(vde_conn, node) (vde_conn)->markov.nodes[(node)]
 #define MARKOV_CURRENT(vde_conn) 		MARKOV_GET_NODE(vde_conn, (vde_conn)->markov.current_node)
 
