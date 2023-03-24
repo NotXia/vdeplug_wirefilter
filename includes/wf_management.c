@@ -79,7 +79,7 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	print_mgmt(fd, "------------ ------------");
 	print_mgmt(fd, "help         print a summary of mgmt commands");
 	// print_mgmt(fd, "load         load a configuration file");
-	// print_mgmt(fd, "showinfo     show status and parameter values");
+	print_mgmt(fd, "showinfo     show status and parameter values");
 	print_mgmt(fd, "loss         set loss percentage");
 	print_mgmt(fd, "lostburst    mean length of lost packet bursts");
 	print_mgmt(fd, "delay        set delay ms");
@@ -97,7 +97,7 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	print_mgmt(fd, "markov-name n,name markov mode: set state's name");
 	print_mgmt(fd, "markov-time ms     markov mode: transition period");
 	print_mgmt(fd, "setedge n1,n2,w    markov mode: set edge weight");
-	// print_mgmt(fd, "showinfo n         markov mode: show parameter values");
+	print_mgmt(fd, "showinfo n         markov mode: show parameter values");
 	print_mgmt(fd, "showedges n        markov mode: show edge weights");
 	print_mgmt(fd, "showcurrent        markov mode: show current state");
 	// print_mgmt(fd, "markov-debug n     markov mode: set debug level");
@@ -229,6 +229,63 @@ static int markovShowCurrent(struct vde_wirefilter_conn *vde_conn, int fd, char 
 	return 0;
 }
 
+static int showInfo(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	int to_show_node = (*arg != 0) ? atoi(arg) : vde_conn->markov.current_node;
+	
+	if (to_show_node < 0 || to_show_node >= vde_conn->markov.nodes_count) {
+		return EINVAL;
+	}
+
+	print_mgmt(fd, "WireFilter");
+	if (vde_conn->markov.nodes_count > 1) {
+		print_mgmt(fd, "Node %d \"%s\" (0,..,%d) Markov-time %dms", 
+						to_show_node, 
+						MARKOV_GET_NODE(vde_conn, to_show_node)->name ? MARKOV_GET_NODE(vde_conn, to_show_node)->name : "", 
+						vde_conn->markov.nodes_count,
+						NS_TO_MS(vde_conn->markov.change_frequency));
+	}
+	
+	print_mgmt(fd, "Loss   L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), LOSS, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), LOSS, RIGHT_TO_LEFT));
+	print_mgmt(fd, "Lburst L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), BURSTYLOSS, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), BURSTYLOSS, RIGHT_TO_LEFT));
+	print_mgmt(fd, "Delay  L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), DELAY, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), DELAY, RIGHT_TO_LEFT));
+	print_mgmt(fd, "Dup    L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), DUP, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), DUP, RIGHT_TO_LEFT));
+	print_mgmt(fd, "Bandw  L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), BANDWIDTH, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), BANDWIDTH, RIGHT_TO_LEFT));
+	print_mgmt(fd, "Speed  L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), SPEED, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), SPEED, RIGHT_TO_LEFT));
+	print_mgmt(fd, "Noise  L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), NOISE, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), NOISE, RIGHT_TO_LEFT));
+	print_mgmt(fd, "MTU    L->R %g      R->L %g   ", 
+					minWireValue(MARKOV_GET_NODE(vde_conn, to_show_node), MTU, LEFT_TO_RIGHT), 
+					minWireValue(MARKOV_GET_NODE(vde_conn, to_show_node), MTU, RIGHT_TO_LEFT));
+	print_mgmt(fd, "Cap.   L->R %g+%g%c   R->L %g+%g%c", 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), CHANBUFSIZE, LEFT_TO_RIGHT), 
+					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), CHANBUFSIZE, RIGHT_TO_LEFT));
+
+	print_mgmt(fd, "Current Delay Queue size:   L->R %d      R->L %d   ", vde_conn->queue.byte_size[LEFT_TO_RIGHT], vde_conn->queue.byte_size[RIGHT_TO_LEFT]);
+	print_mgmt(fd,"Fifoness %s",(vde_conn->fifoness == FIFO) ? "TRUE" : "FALSE");
+	print_mgmt(fd,"Waiting packets in delay queues %d", vde_conn->queue.size);
+	if (vde_conn->blink.socket_fd > 0) {
+		vde_conn->blink.message[vde_conn->blink.id_len] = '\0';
+		print_mgmt(fd,"Blink socket: %s", vde_conn->blink.socket_info.sun_path);
+		print_mgmt(fd,"Blink id:     %s", vde_conn->blink.message);
+		vde_conn->blink.message[vde_conn->blink.id_len] = ' ';
+	}
+
+	return 0;
+}
+
 
 static struct comlist {
 	char *tag;
@@ -236,6 +293,7 @@ static struct comlist {
 	unsigned char type;
 } commandlist [] = {
 	{ "help", 			help, 			WITHFILE },
+	{ "showinfo", 		showInfo, 		WITHFILE },
 	{ "loss", 			setLoss, 		0 },
 	{ "lostburst", 		setBurstyLoss,	0 },
 	{ "delay", 			setDelay, 		0 },

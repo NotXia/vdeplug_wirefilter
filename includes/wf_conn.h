@@ -70,7 +70,7 @@ struct vde_wirefilter_conn {
 		int socket_fd;
 		struct sockaddr_un socket_info;
 		char *message;
-		char id_len;
+		int id_len;
 	} blink;
 
 	char bursty_loss_status[2];

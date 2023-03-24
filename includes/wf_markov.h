@@ -30,6 +30,8 @@
 #define MEGA (1<<20)
 #define GIGA (1<<30)
 
+#define WIRE_FIELDS(node, tag, direction)	(node->value[tag][direction].value), (node->value[tag][direction].plus), (node->value[tag][direction].algorithm == ALGO_UNIFORM ? 'U' : 'N')
+
 
 typedef struct {
 	double value;
