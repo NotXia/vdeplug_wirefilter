@@ -90,8 +90,8 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	print_mgmt(fd, "mtu          set channel MTU (bytes)");
 	print_mgmt(fd, "chanbufsize  set channel buffer size (bytes)");
 	print_mgmt(fd, "fifo         set channel fifoness");
-	// print_mgmt(fd, "shutdown     shut the channel down");
-	// print_mgmt(fd, "logout       log out from this mgmt session");
+	print_mgmt(fd, "shutdown     shut the channel down");
+	print_mgmt(fd, "logout       log out from this mgmt session");
 	print_mgmt(fd, "markov-numnodes n  markov mode: set number of states");
 	print_mgmt(fd, "markov-setnode n   markov mode: set current state");
 	print_mgmt(fd, "markov-name n,name markov mode: set state's name");
@@ -286,6 +286,15 @@ static int showInfo(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	return 0;
 }
 
+static int logout(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)vde_conn; (void)fd; (void)arg;
+	return -1;
+}
+
+static int wfShutdown(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	(void)vde_conn; (void)fd; (void)arg;
+	exit(0);
+}
 
 static struct comlist {
 	char *tag;
@@ -304,6 +313,8 @@ static struct comlist {
 	{ "mtu", 			setMTU, 		0 },
 	{ "chanbufsize", 	setChanbufsize,	0 },
 	{ "fifo", 			setFIFO,		0 },
+	{ "shutdown", 		wfShutdown, 	0 },
+	{ "logout", 		logout, 		0 },
 	{ "markov-numnodes", markovSetNodeNumber, 0 },
 	{ "markov-setnode", markovSetCurrentNode, 0 },
 	{ "markov-name", markovSetNodeName, 0 },
