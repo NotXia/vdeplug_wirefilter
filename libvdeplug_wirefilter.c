@@ -82,6 +82,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	struct vde_wirefilter_conn *newconn = NULL;
 	VDECONN *conn;
 	char *nested_vnl;
+	char *rc_path = NULL;
 	char *delay_str = NULL;
 	char *dup_str = NULL;
 	char *loss_str = NULL;
@@ -97,6 +98,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL, *markov_start_node_str = NULL, *markov_names_str = NULL;
 	char *management_socket_path = NULL, *management_mode_str = NULL;
 	struct vdeparms parms[] = {
+		{ "rc", &rc_path },
 		{ "delay", &delay_str },
 		{ "dup", &dup_str },
 		{ "loss", &loss_str },
@@ -193,6 +195,10 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		newconn->management.connections_count = 0;
 		newconn->management.socket_name = management_socket_path;
 		if ( createManagementSocket(newconn, management_socket_path) < 0 ) { goto error; }
+	}
+
+	if (rc_path) {
+		loadConfig(newconn, -1, rc_path);
 	}
 
 

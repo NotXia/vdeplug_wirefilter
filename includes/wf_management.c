@@ -78,7 +78,7 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	print_mgmt(fd, "COMMAND      HELP");
 	print_mgmt(fd, "------------ ------------");
 	print_mgmt(fd, "help         print a summary of mgmt commands");
-	// print_mgmt(fd, "load         load a configuration file");
+	print_mgmt(fd, "load         load a configuration file");
 	print_mgmt(fd, "showinfo     show status and parameter values");
 	print_mgmt(fd, "loss         set loss percentage");
 	print_mgmt(fd, "lostburst    mean length of lost packet bursts");
@@ -302,6 +302,7 @@ static struct comlist {
 	unsigned char type;
 } commandlist [] = {
 	{ "help", 			help, 			WITHFILE },
+	{ "load", 			loadConfig, 	WITHFILE },
 	{ "showinfo", 		showInfo, 		WITHFILE },
 	{ "loss", 			setLoss, 		0 },
 	{ "lostburst", 		setBurstyLoss,	0 },
@@ -393,4 +394,20 @@ int handleManagementCommand(struct vde_wirefilter_conn *vde_conn, int socket_fd)
 
 		return ret_value;
 	}
+}
+
+int loadConfig(struct vde_wirefilter_conn *vde_conn, int fd, char *rc_path) {
+	FILE *f = fopen(rc_path, "r");
+	if (f == NULL) { return errno; }
+	char buf[MNGM_CMD_MAX_LEN];
+
+	while (fgets(buf, MNGM_CMD_MAX_LEN, f) != NULL) {
+		if (fd >= 0) {
+			print_mgmt(fd,"%s (%s) %s", prompt, rc_path, buf);
+		}
+		executeCommand(vde_conn, fd, buf);
+	}
+
+	fclose(f);
+	return 0;
 }

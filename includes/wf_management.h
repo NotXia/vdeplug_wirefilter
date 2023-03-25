@@ -9,5 +9,6 @@
 int createManagementSocket(struct vde_wirefilter_conn *vde_conn, char *socket_name);
 int acceptManagementConnection(struct vde_wirefilter_conn *vde_conn);
 int handleManagementCommand(struct vde_wirefilter_conn *vde_conn, int socket_fd);
+int loadConfig(struct vde_wirefilter_conn *vde_conn, int fd, char *rc_path);
 
 #endif
