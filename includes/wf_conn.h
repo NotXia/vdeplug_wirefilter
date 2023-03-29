@@ -7,6 +7,7 @@
 #include <sys/un.h>
 #include "./wf_markov.h"
 #include "./wf_queue.h"
+#include "./wf_management.h"
 
 #define LEFT_TO_RIGHT 0
 #define RIGHT_TO_LEFT 1
@@ -19,6 +20,8 @@
 #define FIFO	1
 
 #define BLINK_MESSAGE_CONTENT_SIZE 20 // Size of blink messages without the id
+
+#define MNGM_MAX_CONN 3
 
 
 struct packet_t {
@@ -84,6 +87,8 @@ struct vde_wirefilter_conn {
 		int socket_fd;
 		unsigned int mode;
 		int connections_count;
+		int connections[MNGM_MAX_CONN];
+		int debug_level[MNGM_MAX_CONN];
 		char *socket_name;
 	} management;
 };

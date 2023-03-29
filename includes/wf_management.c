@@ -48,21 +48,39 @@ int acceptManagementConnection(struct vde_wirefilter_conn *vde_conn) {
 	new_connection = accept(vde_conn->management.socket_fd, NULL, NULL);
 	if (new_connection < 0) { return -1; }
 	
-	if (vde_conn->management.connections_count < MNGM_MAX_CONN) {
+	if (vde_conn->management.connections_count < MNGM_MAX_CONN) { // Connection can be accepted
 		snprintf(buf, MNGM_CMD_MAX_LEN, header, PACKAGE_VERSION);
 		if ( write(new_connection, buf, strlen(buf)) < 0 ) { return -1; }
 		if ( write(new_connection, prompt, strlen(prompt)) < 0 ) { return -1; }
 
+		vde_conn->management.connections[vde_conn->management.connections_count] = new_connection;
+		vde_conn->management.debug_level[vde_conn->management.connections_count] = 0;
         vde_conn->management.connections_count++;
 		return new_connection;
-	} else {
+	} else { // Too many connections
 		close(new_connection);
 		return -1;
 	}
 }
 
 
-static int print_mgmt(int fd, const char *format, ...) {
+int closeManagementConnection(struct vde_wirefilter_conn *vde_conn, int socket_fd) {
+	int index = 0;
+	
+	// Determines fd index
+	while (index < vde_conn->management.connections_count && vde_conn->management.connections[index] != socket_fd) { index++; };
+	if (vde_conn->management.connections[index] != socket_fd) { return -1; }
+
+	close(vde_conn->management.connections[index]);
+
+	memmove(&vde_conn->management.connections[index], &vde_conn->management.connections[index+1], sizeof(int) * (vde_conn->management.connections_count-index-1));
+	memmove(&vde_conn->management.debug_level[index], &vde_conn->management.debug_level[index+1], sizeof(int) * (vde_conn->management.connections_count-index-1));
+
+	return 0;
+}
+
+
+int print_mgmt(int fd, const char *format, ...) {
 	va_list arg;
 	char out[MNGM_CMD_MAX_LEN + 1];
 
@@ -100,7 +118,7 @@ static int help(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	print_mgmt(fd, "showinfo n         markov mode: show parameter values");
 	print_mgmt(fd, "showedges n        markov mode: show edge weights");
 	print_mgmt(fd, "showcurrent        markov mode: show current state");
-	// print_mgmt(fd, "markov-debug n     markov mode: set debug level");
+	print_mgmt(fd, "markov-debug n     markov mode: set debug level");
 	return 0;
 }
 
@@ -229,6 +247,21 @@ static int markovShowCurrent(struct vde_wirefilter_conn *vde_conn, int fd, char 
 	return 0;
 }
 
+static int markovSetDebugLevel(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
+	int debug_level = atoi(arg);
+	if (fd < 0 || debug_level < 0) { return EINVAL; }
+
+
+	for (int i=0; i<vde_conn->management.connections_count; i++) {
+		if (vde_conn->management.connections[i] == fd) {
+			vde_conn->management.debug_level[i] = debug_level;
+			return 0;
+		}
+	}
+
+	return EINVAL;
+}
+
 static int showInfo(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	int to_show_node = (*arg != 0) ? atoi(arg) : vde_conn->markov.current_node;
 	
@@ -316,13 +349,14 @@ static struct comlist {
 	{ "fifo", 			setFIFO,		0 },
 	{ "shutdown", 		wfShutdown, 	0 },
 	{ "logout", 		logout, 		0 },
-	{ "markov-numnodes", markovSetNodeNumber, 0 },
-	{ "markov-setnode", markovSetCurrentNode, 0 },
-	{ "markov-name", markovSetNodeName, 0 },
-	{ "markov-time", markovSetTime, 0 },
-	{ "setedge", markovSetEdge, 0 },
-	{ "showedges", markovShowEdges, WITHFILE },
-	{ "showcurrent", markovShowCurrent, WITHFILE },
+	{ "markov-numnodes", 	markovSetNodeNumber, 	0 },
+	{ "markov-setnode", 	markovSetCurrentNode, 	0 },
+	{ "markov-name", 		markovSetNodeName, 		0 },
+	{ "markov-time", 		markovSetTime, 			0 },
+	{ "setedge", 			markovSetEdge, 			0 },
+	{ "showedges", 			markovShowEdges, 		WITHFILE },
+	{ "showcurrent", 		markovShowCurrent, 		WITHFILE },
+	{ "markov-debug", 		markovSetDebugLevel, 	0 },
 };
 #define NUM_COMMANDS ( (int)(sizeof(commandlist)/sizeof(struct comlist)) )
 

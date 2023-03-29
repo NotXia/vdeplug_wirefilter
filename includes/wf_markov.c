@@ -6,6 +6,7 @@
 #include <string.h>
 #include "./wf_time.h"
 #include <sys/timerfd.h>
+#include "./wf_management.h"
 #include "./wf_debug.h"
 
 
@@ -148,6 +149,21 @@ void markov_step(struct vde_wirefilter_conn *vde_conn, const int start_node) {
 		}
 		else {
 			probability -= change_probability;
+		}
+	}
+
+	// Management debug
+	if (vde_conn->markov.current_node != new_node) {
+		for (int i=0; i<vde_conn->management.connections_count; i++) {
+			if (vde_conn->management.debug_level[i] > 0) {
+				print_mgmt(
+					vde_conn->management.connections[i], 
+					"%04d Node %d \"%s\" -> %d \"%s\"",
+					3800+new_node,
+					vde_conn->markov.current_node, MARKOV_CURRENT(vde_conn)->name ? MARKOV_CURRENT(vde_conn)->name : "",
+					new_node, MARKOV_GET_NODE(vde_conn, new_node)->name ? MARKOV_GET_NODE(vde_conn, new_node)->name : ""
+				);
+			}
 		}
 	}
 

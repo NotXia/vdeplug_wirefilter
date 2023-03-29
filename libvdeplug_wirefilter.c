@@ -435,7 +435,7 @@ static void *packetHandlerThread(void *param) {
 			// Management socket hang-up
 			for (int i=1; i<=vde_conn->management.connections_count; i++) {
 				if (poll_fd[POLL_MNGM + i].revents & POLLHUP) {
-					close(poll_fd[POLL_MNGM + i].fd);
+					closeManagementConnection(vde_conn, poll_fd[POLL_MNGM + i].fd);
 					memmove(&poll_fd[POLL_MNGM+i], &poll_fd[POLL_MNGM+i+1], sizeof(struct pollfd) * (vde_conn->management.connections_count-i));
 					poll_fd[POLL_MNGM+vde_conn->management.connections_count].fd = -1;
 
