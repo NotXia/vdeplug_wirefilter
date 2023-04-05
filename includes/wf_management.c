@@ -7,9 +7,10 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include "./wf_markov.h"
 #include "./wf_time.h"
-#include "./wf_debug.h"
+#include "./wf_log.h"
 
 
 #define PACKAGE_VERSION "1.0"
@@ -202,7 +203,6 @@ static int markovSetNodeName(struct vde_wirefilter_conn *vde_conn, int fd, char 
 
 static int markovSetTime(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	(void)fd;
-	WF_DEBUG_PRINT(DEBUG_LOGS, "|%s| %lld %lld\n", arg, atoll(arg), MS_TO_NS(atoll(arg)));
 	vde_conn->markov.change_frequency = MS_TO_NS(atoll(arg));
 	setTimer(vde_conn->markov.timerfd, vde_conn->markov.change_frequency);
 	return 0;
@@ -374,7 +374,7 @@ static int findCommandIndex(char *cmd) {
 static int executeCommand(struct vde_wirefilter_conn *vde_conn, int socket_fd, char *cmd) {
 	int ret_value = ENOSYS;
 	int command_index;
-	// char *cmd_start = cmd;
+	char *cmd_start = cmd;
 	
 	// Trim
     while (*cmd == ' ' || *cmd == '\t' || *cmd == '\n') { cmd++; }
@@ -402,7 +402,7 @@ static int executeCommand(struct vde_wirefilter_conn *vde_conn, int socket_fd, c
 				print_mgmt(socket_fd, "1%03d %s", ret_value, strerror(ret_value));
 			}
 		} else if (ret_value != 0) {
-			// printlog(LOG_ERR,"rc command error: %s %s",cmd_start,strerror(ret_value));
+			print_log(LOG_ERR, "rc command error: %s %s", cmd_start, strerror(ret_value));
 		}
 	}
 

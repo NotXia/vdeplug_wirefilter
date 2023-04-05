@@ -34,7 +34,8 @@
 #include <wf_time.h>
 #include <wf_markov.h>
 #include <wf_management.h>
-#include "./includes/wf_debug.h"
+#include <wf_log.h>
+
 
 
 #define DROP -1
@@ -78,6 +79,8 @@ static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id);
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
 	(void)descr; (void)interface_version; (void)open_args;
+
+	init_logs();
 
 	struct vde_wirefilter_conn *newconn = NULL;
 	VDECONN *conn;

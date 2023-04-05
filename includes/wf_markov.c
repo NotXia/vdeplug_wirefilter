@@ -7,7 +7,6 @@
 #include "./wf_time.h"
 #include <sys/timerfd.h>
 #include "./wf_management.h"
-#include "./wf_debug.h"
 
 
 void markov_init(struct vde_wirefilter_conn *vde_conn, int size, int start_node, uint64_t change_frequency) {
