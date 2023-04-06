@@ -47,16 +47,18 @@ typedef struct {
 struct vde_wirefilter_conn;
 
 
-void markov_init(struct vde_wirefilter_conn *vde_conn, int size, int start_node, uint64_t change_frequency);
-void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str);
-void markov_setNames(struct vde_wirefilter_conn *vde_conn, char *names_str);
-void markov_resize(struct vde_wirefilter_conn *vde_conn, int new_nodes_count);
-void markov_step(struct vde_wirefilter_conn *vde_conn, const int start_node);
+void initMarkov(struct vde_wirefilter_conn *vde_conn, const int size, const int start_node, const uint64_t change_frequency);
+void closeMarkov(struct vde_wirefilter_conn *vde_conn);
 
-void setWireValue(struct vde_wirefilter_conn *vde_conn, int tag, char *value_str, int flags);
-double maxWireValue(MarkovNode *node, int tag, int direction);
-double minWireValue(MarkovNode *node, int tag, int direction);
-double computeWireValue(MarkovNode *node, int tag, int direction);
+void markovSetEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str);
+void markovSetNames(struct vde_wirefilter_conn *vde_conn, char *names_str);
+void markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_count);
+void markovStep(struct vde_wirefilter_conn *vde_conn, const int start_node);
+
+void setWireValue(struct vde_wirefilter_conn *vde_conn, const int tag, char *value_str, const int flags);
+double maxWireValue(MarkovNode *node, const int tag, const int direction);
+double minWireValue(MarkovNode *node, const int tag, const int direction);
+double computeWireValue(MarkovNode *node, const int tag, const int direction);
 
 
 #endif

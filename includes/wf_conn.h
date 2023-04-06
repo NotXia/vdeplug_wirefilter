@@ -43,18 +43,17 @@ struct vde_wirefilter_conn {
 	pthread_t packet_handler_thread;
 	int *send_pipefd;
 	int *receive_pipefd;
-	pthread_mutex_t receive_lock; // Mutex to prevent concurrent writes on the receive pipe
-
-	int queue_timer; // Timer for packets delay
-	char fifoness;
+	pthread_mutex_t receive_lock; // Mutex to prevent multiple writes on the receive pipe
 
 	struct {
 		QueueNode **queue; // Priority queue implemented as heap
 		unsigned int size;
 		unsigned int max_size;
 		unsigned int byte_size[2];
+		int timerfd; // Timer for packets delay
 		
 		// To preserve fifoness
+		char fifoness;
 		uint64_t max_forward_time;
 		unsigned int counter;
 	} queue;

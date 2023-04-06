@@ -1,22 +1,31 @@
 #include "./wf_markov.h"
-#include "./wf_conn.h"
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include "./wf_time.h"
 #include <sys/timerfd.h>
+#include <unistd.h>
+#include "./wf_conn.h"
+#include "./wf_time.h"
 #include "./wf_management.h"
 
 
-void markov_init(struct vde_wirefilter_conn *vde_conn, int size, int start_node, uint64_t change_frequency) {
-	markov_resize(vde_conn, size <= 0 ? 1 : size);
+void initMarkov(struct vde_wirefilter_conn *vde_conn, const int size, const int start_node, const uint64_t change_frequency) {
+	markovResize(vde_conn, size <= 0 ? 1 : size);
 	vde_conn->markov.current_node = start_node;
 	vde_conn->markov.timerfd = timerfd_create(CLOCK_REALTIME, 0);
 	vde_conn->markov.change_frequency = change_frequency;
 }
 
-static void markov_rebalance_node(struct vde_wirefilter_conn *vde_conn, int node) {
+void closeMarkov(struct vde_wirefilter_conn *vde_conn) {
+	free(vde_conn->markov.nodes);
+	free(vde_conn->markov.adjacency);
+	close(vde_conn->markov.timerfd);
+}
+
+
+/* Rebalances the edges of a node */
+static void markovRebalanceNode(struct vde_wirefilter_conn *vde_conn, const int node) {
 	ADJMAP(vde_conn, node, node) = 100.0;
 
 	for (int i=1; i<vde_conn->markov.nodes_count; i++) {
@@ -24,7 +33,11 @@ static void markov_rebalance_node(struct vde_wirefilter_conn *vde_conn, int node
 	}
 }
 
-void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str) {
+/**
+ * Parses the string of edges names
+ * Format: "node1,node2,weight node1,node2,weight ..."
+*/
+void markovSetEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str) {
 	int start_node, end_node;
 	double weight;
 
@@ -34,7 +47,7 @@ void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str) {
 
 		sscanf(edges_str, "%d,%d,%lf", &start_node, &end_node, &weight);
 		ADJMAP(vde_conn, start_node, end_node) = weight;
-		markov_rebalance_node(vde_conn, start_node);
+		markovRebalanceNode(vde_conn, start_node);
 
 		// Moves to the next edge value
 		while (*edges_str != ' ' && *edges_str != '\0') { edges_str++; }
@@ -42,10 +55,10 @@ void markov_setEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str) {
 }
 
 /**
- * Parses the string of names (note: names cannot contain spaces)
- * Format: "node,name node,name node,name"
+ * Parses the string of node names (note: names cannot contain spaces)
+ * Format: "node,name node,name node,name ..."
 */
-void markov_setNames(struct vde_wirefilter_conn *vde_conn, char *names_str) {
+void markovSetNames(struct vde_wirefilter_conn *vde_conn, char *names_str) {
 	int node;
 	char is_last = 0;
 	char *name_end = NULL;
@@ -81,7 +94,7 @@ void markov_setNames(struct vde_wirefilter_conn *vde_conn, char *names_str) {
 	}
 }
 
-static void copyAdjacency(struct vde_wirefilter_conn *vde_conn, int new_size, double *new_map) {
+static void copyAdjacency(struct vde_wirefilter_conn *vde_conn, const int new_size, double *new_map) {
 	for (int i=0; i<new_size; i++) {
 		// Begins with an edge to itself (the node is not connected to anything)
 		ADJMAPN(new_map, i, i, new_size) = 100.0;
@@ -101,7 +114,7 @@ static void copyAdjacency(struct vde_wirefilter_conn *vde_conn, int new_size, do
 /**
  * Increases or decreases the size of the Markov chain
 */
-void markov_resize(struct vde_wirefilter_conn *vde_conn, int new_nodes_count) {
+void markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_count) {
 	if (vde_conn->markov.nodes_count == new_nodes_count) { return; }
 	
 	// The current number of nodes is insufficient
@@ -135,7 +148,8 @@ void markov_resize(struct vde_wirefilter_conn *vde_conn, int new_nodes_count) {
 }
 
 
-void markov_step(struct vde_wirefilter_conn *vde_conn, const int start_node) {
+/* Changes Markov state */
+void markovStep(struct vde_wirefilter_conn *vde_conn, const int start_node) {
 	double probability = drand48() * 100;
 	int new_node = 0;
 	
@@ -182,7 +196,7 @@ static int parseWireValueString(char* string, double *value, double *plus, char 
 
 	while ((string[n] == ' ' || string[n] == '\n' || string[n] == '\t') && n > 0) { string[n--] = '\0'; }
 
-	// Reads Markov node
+	// Reads Markov node number (if set)
 	if (string[n] == ']') {
 		string[n--] = '\0';
 		while (string[n] != '[' && n > 0) { n--; }
@@ -229,7 +243,7 @@ static int parseWireValueString(char* string, double *value, double *plus, char 
 	return 0;
 }
 
-static void setNodeValue(MarkovNode *node, int tag, int direction, double value, double plus, char algorithm) {
+static void setNodeValue(MarkovNode *node, const int tag, const int direction, const double value, const double plus, const char algorithm) {
 	node->value[tag][direction].value = value;
 	node->value[tag][direction].plus = plus;
 	node->value[tag][direction].algorithm = algorithm;
@@ -239,7 +253,7 @@ static void setNodeValue(MarkovNode *node, int tag, int direction, double value,
  * Sets the tag's value of a node given the values as strings
  * If the value of a specific direction is given, it will be set in place of the bidirectional value (only for that direction).
 */
-void setWireValue(struct vde_wirefilter_conn *vde_conn, int tag, char *value_str, int flags) {
+void setWireValue(struct vde_wirefilter_conn *vde_conn, const int tag, char *value_str, const int flags) {
 	double value = 0, plus = 0;
 	char algorithm = ALGO_UNIFORM;
 	char *value_end;
@@ -294,21 +308,21 @@ void setWireValue(struct vde_wirefilter_conn *vde_conn, int tag, char *value_str
 /**
  *  Computes the maximum possible value for the configuration of a given node 
 */
-double maxWireValue(MarkovNode *node, int tag, int direction) {
+double maxWireValue(MarkovNode *node, const int tag, const int direction) {
 	return (node->value[tag][direction].value + node->value[tag][direction].plus);
 }
 
 /**
  * Computes the minimum possible value for the configuration of a given node
 */
-double minWireValue(MarkovNode *node, int tag, int direction) {
+double minWireValue(MarkovNode *node, const int tag, const int direction) {
 	return (node->value[tag][direction].value - node->value[tag][direction].plus);
 }
 
 /**
- * Computes the value of the configuration of a given node
+ * Computes the value for the configuration of a given node
 */
-double computeWireValue(MarkovNode *node, int tag, int direction) {
+double computeWireValue(MarkovNode *node, const int tag, const int direction) {
 	WireValue *wv = &node->value[tag][direction];
 	
 	if (wv->plus == 0) {

@@ -37,7 +37,6 @@
 #include <wf_log.h>
 
 
-
 #define DROP -1
 #define FORWARD 0
 
@@ -75,6 +74,7 @@ static Packet *noiseHandler(struct vde_wirefilter_conn *vde_conn, Packet *packet
 
 static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path);
 static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id);
+static void closeBlink(struct vde_wirefilter_conn *vde_conn);
 
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
@@ -82,8 +82,8 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 
 	init_logs();
 
-	struct vde_wirefilter_conn *newconn = NULL;
-	VDECONN *conn;
+	struct vde_wirefilter_conn *new_conn = NULL;
+	VDECONN *nested_conn;
 	char *nested_vnl;
 	char *rc_path = NULL;
 	char *delay_str = NULL;
@@ -93,12 +93,10 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *mtu_str = NULL;
 	char *nofifo_str = NULL;
 	char *channel_size_str = NULL;
-	char *blink_path_str = NULL;
-	char *blink_id_str = NULL;
 	char *bandwidth_str = NULL;
 	char *speed_str = NULL;
 	char *noise_str = NULL;
-	char *markov_num_nodes_str = NULL, *markov_edges_str = NULL, *markov_time_str = NULL, *markov_start_node_str = NULL, *markov_names_str = NULL;
+	char *blink_path_str = NULL, *blink_id_str = NULL;
 	char *management_socket_path = NULL, *management_mode_str = NULL;
 	struct vdeparms parms[] = {
 		{ "rc", &rc_path },
@@ -109,12 +107,10 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "mtu", &mtu_str },
 		{ "nofifo", &nofifo_str },
 		{ "bufsize", &channel_size_str },
-		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
 		{ "bandwidth", &bandwidth_str },
 		{ "speed", &speed_str },
 		{ "noise", &noise_str },
-		{ "markov-numnodes", &markov_num_nodes_str }, { "markov-edges", &markov_edges_str }, { "markov-time", &markov_time_str },
-		{ "markov-setnode", &markov_start_node_str }, { "markov-name", &markov_names_str },
+		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
 		{ "mgmt", &management_socket_path }, { "mgmtmode", &management_mode_str },
 		{ NULL, NULL }
 	};
@@ -123,98 +119,60 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	if ( vde_parsepathparms(vde_url, parms) != 0 ) { return NULL; } 	// Retrieves the plugin parameters
 	
 	// Opens the connection with the nested VNL
-	conn = vde_open(nested_vnl, descr, open_args);
-	if (conn == NULL) { return NULL; }
-	if ( (newconn = calloc(1, sizeof(struct vde_wirefilter_conn))) == NULL ) {
+	nested_conn = vde_open(nested_vnl, descr, open_args);
+	if (nested_conn == NULL) { return NULL; }
+	
+	if ( (new_conn = calloc(1, sizeof(struct vde_wirefilter_conn))) == NULL ) {
 		errno = ENOMEM;
 		goto error;
 	}
-	newconn->conn=conn;
+	new_conn->conn = nested_conn;
 
 	// Pipes initialization
-	newconn->send_pipefd = malloc(2*sizeof(int));
-	newconn->receive_pipefd = malloc(2*sizeof(int));
-	if ( pipe(newconn->send_pipefd) != 0 ) { goto error; } 
-	if ( pipe(newconn->receive_pipefd) != 0 ) { goto error; } 
+	new_conn->send_pipefd = malloc(2*sizeof(int));
+	new_conn->receive_pipefd = malloc(2*sizeof(int));
+	if ( pipe(new_conn->send_pipefd) != 0 ) { goto error; } 
+	if ( pipe(new_conn->receive_pipefd) != 0 ) { goto error; } 
 
+	initQueue(new_conn, nofifo_str == NULL ? FIFO : NO_FIFO);
 
-	pthread_mutex_init(&newconn->receive_lock, NULL);
-
-
-	newconn->fifoness = nofifo_str == NULL ? FIFO : NO_FIFO;
-
-	newconn->queue_timer = timerfd_create(CLOCK_REALTIME, 0);
-	newconn->queue.queue = NULL;
-	newconn->queue.size = 0;
-	newconn->queue.max_size = 0;
-	newconn->queue.byte_size[LEFT_TO_RIGHT] = 0;
-	newconn->queue.byte_size[RIGHT_TO_LEFT] = 0;
-	newconn->queue.max_forward_time = 0;
-	newconn->queue.counter = 0;
-
-	newconn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
-
-
-	int num_nodes = markov_num_nodes_str ? atoi(markov_num_nodes_str) : 1;
-	int start_node = markov_start_node_str ? atoi(markov_start_node_str) : 0;
-	uint64_t update_frequency = MS_TO_NS(markov_time_str ? atof(markov_time_str) : 100);
-
-	markov_init(newconn, num_nodes, start_node, update_frequency);
-	if (markov_edges_str) {
-		markov_setEdges(newconn, markov_edges_str);
-	}
-	if (markov_names_str) {
-		markov_setNames(newconn, markov_names_str);
-	}
+	initMarkov(new_conn, 1, 0, MS_TO_NS(100));
 	
-	setWireValue(newconn, DELAY, delay_str, 0);
-	setWireValue(newconn, DUP, dup_str, 0);
-	setWireValue(newconn, LOSS, loss_str, 0);
-	setWireValue(newconn, BURSTYLOSS, bursty_loss_str, 0);
-	setWireValue(newconn, MTU, mtu_str, WIRE_BIDIRECTIONAL);
-	setWireValue(newconn, CHANBUFSIZE, channel_size_str, WIRE_BIDIRECTIONAL);
-	setWireValue(newconn, BANDWIDTH, bandwidth_str, 0);
-	setWireValue(newconn, SPEED, speed_str, 0);
-	setWireValue(newconn, NOISE, noise_str, 0);
-
+	setWireValue(new_conn, DELAY, delay_str, 0);
+	setWireValue(new_conn, DUP, dup_str, 0);
+	setWireValue(new_conn, LOSS, loss_str, 0);
+	setWireValue(new_conn, BURSTYLOSS, bursty_loss_str, 0);
+	setWireValue(new_conn, MTU, mtu_str, WIRE_BIDIRECTIONAL);
+	setWireValue(new_conn, CHANBUFSIZE, channel_size_str, WIRE_BIDIRECTIONAL);
+	setWireValue(new_conn, BANDWIDTH, bandwidth_str, 0);
+	setWireValue(new_conn, SPEED, speed_str, 0);
+	setWireValue(new_conn, NOISE, noise_str, 0);
+	new_conn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
+	new_conn->bandwidth_next[LEFT_TO_RIGHT] = 0;
+	new_conn->bandwidth_next[RIGHT_TO_LEFT] = 0;
 
 	if (blink_path_str) { 
-		openBlinkSocket(newconn, blink_path_str); 
-		if ( setBlinkId(newconn, blink_id_str) == -1 ) { goto error; };
+		openBlinkSocket(new_conn, blink_path_str); 
+		if ( setBlinkId(new_conn, blink_id_str) == -1 ) { goto error; };
 	}
 
-
-	newconn->bandwidth_next[LEFT_TO_RIGHT] = 0;
-	newconn->bandwidth_next[RIGHT_TO_LEFT] = 0;
-
-
-	newconn->management.socket_fd = -1;
-
+	new_conn->management.socket_fd = -1;
 	if (management_socket_path) {
-		newconn->management.mode = 0700;
-		if (management_mode_str) {
-			sscanf(management_mode_str, "%o", &newconn->management.mode);
-		}
-		newconn->management.connections_count = 0;
-		newconn->management.socket_name = management_socket_path;
-		if ( createManagementSocket(newconn, management_socket_path) < 0 ) { goto error; }
+		if ( initManagement(new_conn, management_socket_path, management_mode_str) < 0 ) { goto error; };
 	}
 
 	if (rc_path) {
-		loadConfig(newconn, -1, rc_path);
+		loadConfig(new_conn, -1, rc_path);
 	}
 
-
 	// Starts packet handler thread
-	pthread_t packet_handler_thread;
-	if ( pthread_create(&packet_handler_thread, NULL, &packetHandlerThread, (void*)newconn) != 0 ) { goto error; };
-	newconn->packet_handler_thread = packet_handler_thread;
+	pthread_mutex_init(&new_conn->receive_lock, NULL);
+	if ( pthread_create(&new_conn->packet_handler_thread, NULL, &packetHandlerThread, (void*)new_conn) != 0 ) { goto error; };
 
-
-	return (VDECONN *)newconn;
+	return (VDECONN *)new_conn;
 
 	error:
-		vde_close(conn);
+		vde_close(nested_conn);
 		return NULL;
 }
 
@@ -230,10 +188,9 @@ static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int fla
 	struct pollfd poll_fd[1] = {
 		{ .fd=vde_conn->receive_pipefd[0], .events=POLLIN }
 	};
-	int poll_ret;
 
-	if ( (poll_ret = poll(poll_fd, POLL_SIZE, -1)) > 0 ) {
-		// A packet arrived from the thread (so it can be received)
+	if ( poll(poll_fd, POLL_SIZE, -1) > 0 ) {
+		// A packet arrived from the thread (which means that it can be received)
 		if (poll_fd[0].revents & POLLIN) {
 			ssize_t read_len = read(vde_conn->receive_pipefd[0], buf, VDE_ETHBUFSIZE);
 			pthread_mutex_unlock(&vde_conn->receive_lock);
@@ -254,7 +211,7 @@ static ssize_t vde_wirefilter_send(VDECONN *conn, const void *buf, size_t len, i
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
 	uint64_t now = now_ns();
 
-	// Speed handling
+	// Speed delay handling
 	if (vde_conn->speed_next[LEFT_TO_RIGHT] > now) {
 		usleep( NS_TO_US(vde_conn->speed_next[LEFT_TO_RIGHT] - now) );
 	}
@@ -295,22 +252,31 @@ static int vde_wirefilter_close(VDECONN *conn) {
 	struct vde_wirefilter_conn *vde_conn = (struct vde_wirefilter_conn *)conn;
 
 	pthread_cancel(vde_conn->packet_handler_thread);
+	pthread_mutex_destroy(&vde_conn->receive_lock);
+
 	close(vde_conn->send_pipefd[0]);
 	close(vde_conn->send_pipefd[1]);
 	close(vde_conn->receive_pipefd[0]);
 	close(vde_conn->receive_pipefd[1]);
-	close(vde_conn->queue_timer);
-	pthread_mutex_destroy(&vde_conn->receive_lock);
-	if (vde_conn->management.socket_fd > 0) {
-		remove(vde_conn->management.socket_name);
-	}
+	free(vde_conn->send_pipefd);
+	free(vde_conn->receive_pipefd);
+	close(vde_conn->speed_timer);
+	closeQueue(vde_conn);
+	closeMarkov(vde_conn);
+	if (vde_conn->management.socket_fd > 0) { closeManagement(vde_conn); }
+	if (vde_conn->blink.socket_fd > 0) { closeBlink(vde_conn); }
 	
-	int ret_value = vde_close(vde_conn->conn);
+	int ret_value = vde_close(vde_conn->conn); // Closes nested connection
 	free(vde_conn);
 	return ret_value;
 }
 
-#define POLL_MNGM 5
+#define POLL_PIPE_LR 		0
+#define POLL_PIPE_RL 		1
+#define POLL_QUEUE_TIMER 	2
+#define POLL_SPEED_TIMER	3
+#define POLL_MARKOV_TIMER	4
+#define POLL_MNGM 			5
 
 static void *packetHandlerThread(void *param) {
 	pthread_detach(pthread_self());
@@ -321,21 +287,15 @@ static void *packetHandlerThread(void *param) {
 	struct pollfd poll_fd[6+MNGM_MAX_CONN] = {
 		{ .fd=vde_conn->send_pipefd[0], .events=POLLIN },					// Left to right packets
 		{ .fd=vde_datafd(vde_conn->conn), .events=POLLIN },					// Right to left packets
-		{ .fd=vde_conn->queue_timer, .events=POLLIN },						// Packet queue timer
-		{ .fd=vde_conn->speed_timer, .events=POLLIN },						// Packet queue timer
+		{ .fd=vde_conn->queue.timerfd, .events=POLLIN },					// Packet queue timer
+		{ .fd=vde_conn->speed_timer, .events=POLLIN },						// Packet speed timer
 		{ .fd=vde_conn->markov.timerfd, .events=POLLIN },					// Markov chain state change
 		{ .fd=vde_conn->management.socket_fd, .events=POLLIN },				// Management socket
 	};
 	for (int i=1; i<=MNGM_MAX_CONN; i++) { poll_fd[POLL_MNGM + i].fd = -1; } // Management socket clients
 
-	int poll_ret;
-
 	ssize_t rw_len;
-
 	unsigned char receive_buffer[VDE_ETHBUFSIZE];
-	ssize_t receive_length;
-
-	struct itimerspec disarm_timer = { { 0, 0 }, { 0, 0 } };
 	uint64_t now;
 
 
@@ -344,12 +304,10 @@ static void *packetHandlerThread(void *param) {
 
 
 	while(1) {
-		poll_ret = poll(poll_fd, POLL_SIZE, -1);
-
-		if (poll_ret > 0) {
+		if (poll(poll_fd, POLL_SIZE, -1) > 0) {
 
 			// A packet has to be sent
-			if (poll_fd[0].revents & POLLIN) {
+			if (poll_fd[POLL_PIPE_LR].revents & POLLIN) {
 				Packet *packet;
 				rw_len = read(vde_conn->send_pipefd[0], &packet, sizeof(void*));
 				if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
@@ -360,22 +318,22 @@ static void *packetHandlerThread(void *param) {
 
 
 			// A packet can be received from the nested plugin
-			if (poll_fd[1].revents & POLLIN) {
+			if (poll_fd[POLL_PIPE_RL].revents & POLLIN) {
 				now = now_ns();
 
 				// Speed handling
 				if (vde_conn->speed_next[RIGHT_TO_LEFT] > now) {
-					poll_fd[1].events &= ~POLLIN; // Stop receiving packets
+					poll_fd[POLL_PIPE_RL].events &= ~POLLIN; // Stop receiving packets
 					setTimer(vde_conn->speed_timer, (vde_conn->speed_next[RIGHT_TO_LEFT] - now));
 				}
 				else {
-					receive_length = vde_recv(vde_conn->conn, receive_buffer, VDE_ETHBUFSIZE, 0);
+					rw_len = vde_recv(vde_conn->conn, receive_buffer, VDE_ETHBUFSIZE, 0);
 					
-					if (receive_length > 1) { // Not discarded packet
+					if (rw_len > 1) { // Not discarded packet
 						Packet *packet = malloc(sizeof(Packet));
-						packet->buf = malloc(receive_length);
-						memcpy(packet->buf, receive_buffer, receive_length);
-						packet->len = receive_length;
+						packet->buf = malloc(rw_len);
+						memcpy(packet->buf, receive_buffer, rw_len);
+						packet->len = rw_len;
 						packet->flags = 0;
 						packet->direction = RIGHT_TO_LEFT;
 
@@ -387,11 +345,10 @@ static void *packetHandlerThread(void *param) {
 
 
 			// Time to send something
-			if (poll_fd[2].revents & POLLIN) {
-				timerfd_settime(vde_conn->queue_timer, 0, &disarm_timer, NULL);
+			if (poll_fd[POLL_QUEUE_TIMER].revents & POLLIN) {
+				disarmTimer(vde_conn->queue.timerfd);
 
 				Packet *packet;
-
 				while (vde_conn->queue.size > 0 && nextQueueTime(vde_conn) < now_ns()) {
 					packet = dequeue(vde_conn);
 					sendPacket(vde_conn, packet);
@@ -404,17 +361,17 @@ static void *packetHandlerThread(void *param) {
 			}
 			
 
-			// Packets reception (right to left) can be restored
-			if (poll_fd[3].revents & POLLIN) {
-				timerfd_settime(vde_conn->speed_timer, 0, &disarm_timer, NULL);
-				poll_fd[1].events |= POLLIN; // Restart receiving packets
+			// Packets reception (right to left) can be restored (speed handling)
+			if (poll_fd[POLL_SPEED_TIMER].revents & POLLIN) {
+				disarmTimer(vde_conn->speed_timer);
+				poll_fd[POLL_PIPE_RL].events |= POLLIN; // Restart receiving packets
 			}
 
 
 			// Time to change markov chain state
-			if (poll_fd[4].revents & POLLIN) {
+			if (poll_fd[POLL_MARKOV_TIMER].revents & POLLIN) {
 				setTimer(vde_conn->markov.timerfd, vde_conn->markov.change_frequency);
-				markov_step(vde_conn, vde_conn->markov.current_node);
+				markovStep(vde_conn, vde_conn->markov.current_node);
 			}
 
 
@@ -439,6 +396,8 @@ static void *packetHandlerThread(void *param) {
 			for (int i=1; i<=vde_conn->management.connections_count; i++) {
 				if (poll_fd[POLL_MNGM + i].revents & POLLHUP) {
 					closeManagementConnection(vde_conn, poll_fd[POLL_MNGM + i].fd);
+
+					// Shifts poll fds
 					memmove(&poll_fd[POLL_MNGM+i], &poll_fd[POLL_MNGM+i+1], sizeof(struct pollfd) * (vde_conn->management.connections_count-i));
 					poll_fd[POLL_MNGM+vde_conn->management.connections_count].fd = -1;
 
@@ -486,6 +445,7 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 
 /* Sends the packet to the correct destination */
 static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
+	// Blink message handling
 	if (vde_conn->blink.socket_fd) {
 		char *message_content = vde_conn->blink.message + (vde_conn->blink.id_len+1); // Skip id and blank
 		
@@ -512,7 +472,8 @@ static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 
 
 static char mtuHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet) {
-	if (minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction) > 0 && packet->len > minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction)) {
+	if (minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction) > 0 && 
+		packet->len > minWireValue(MARKOV_CURRENT(vde_conn), MTU, packet->direction)) {
 		return DROP;
 	}
 
@@ -661,7 +622,7 @@ static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_p
 	vde_conn->blink.socket_info.sun_family = PF_UNIX;
 	strncpy(vde_conn->blink.socket_info.sun_path, socket_path, sizeof(vde_conn->blink.socket_info.sun_path)-1);
 
-	vde_conn->blink.socket_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+	vde_conn->blink.socket_fd = socket(PF_UNIX, SOCK_DGRAM, 0);
 }
 
 static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id) {
@@ -676,4 +637,9 @@ static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id) {
 
 	vde_conn->blink.id_len = strlen(to_set_id);
 	return asprintf(&vde_conn->blink.message, "%s %*c", to_set_id, BLINK_MESSAGE_CONTENT_SIZE, ' ');
+}
+
+static void closeBlink(struct vde_wirefilter_conn *vde_conn) {
+	close(vde_conn->blink.socket_fd);
+	remove(vde_conn->blink.socket_info.sun_path);
 }

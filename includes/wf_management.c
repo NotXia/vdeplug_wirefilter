@@ -21,6 +21,25 @@ static char prompt[]="\nVDEwf$ ";
 #define WITHFILE 0x80
 
 
+int initManagement(struct vde_wirefilter_conn *vde_conn, char *socket_path, char *mode_str) {
+	vde_conn->management.mode = 0700;
+	if (mode_str) {
+		sscanf(mode_str, "%o", &vde_conn->management.mode);
+	}
+
+	vde_conn->management.connections_count = 0;
+	vde_conn->management.socket_name = socket_path;
+	if ( createManagementSocket(vde_conn, socket_path) < 0 ) { return -1; }
+
+	return 0;
+}
+
+void closeManagement(struct vde_wirefilter_conn *vde_conn) {
+	close(vde_conn->management.socket_fd);
+	remove(vde_conn->management.socket_name);
+}
+
+
 int createManagementSocket(struct vde_wirefilter_conn *vde_conn, char *socket_name) {
 	int socket_fd;
 	struct sockaddr_un sun;
@@ -58,7 +77,7 @@ int acceptManagementConnection(struct vde_wirefilter_conn *vde_conn) {
 		vde_conn->management.debug_level[vde_conn->management.connections_count] = 0;
         vde_conn->management.connections_count++;
 		return new_connection;
-	} else { // Too many connections
+	} else { // Too many active connections
 		close(new_connection);
 		return -1;
 	}
@@ -74,6 +93,7 @@ int closeManagementConnection(struct vde_wirefilter_conn *vde_conn, int socket_f
 
 	close(vde_conn->management.connections[index]);
 
+	// Shifts connections list
 	memmove(&vde_conn->management.connections[index], &vde_conn->management.connections[index+1], sizeof(int) * (vde_conn->management.connections_count-index-1));
 	memmove(&vde_conn->management.debug_level[index], &vde_conn->management.debug_level[index+1], sizeof(int) * (vde_conn->management.connections_count-index-1));
 
@@ -179,13 +199,13 @@ static int setChanbufsize(struct vde_wirefilter_conn *vde_conn, int fd, char *ar
 
 static int setFIFO(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	(void)fd;
-	vde_conn->fifoness = atoi(arg);
+	vde_conn->queue.fifoness = atoi(arg);
 	return 0;
 }
 
 static int markovSetNodeNumber(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	(void)fd;
-	markov_resize(vde_conn, atoi(arg));
+	markovResize(vde_conn, atoi(arg));
 	return 0;
 }
 
@@ -197,7 +217,7 @@ static int markovSetCurrentNode(struct vde_wirefilter_conn *vde_conn, int fd, ch
 
 static int markovSetNodeName(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	(void)fd;
-	markov_setNames(vde_conn, arg);
+	markovSetNames(vde_conn, arg);
 	return 0;
 }
 
@@ -210,7 +230,7 @@ static int markovSetTime(struct vde_wirefilter_conn *vde_conn, int fd, char *arg
 
 static int markovSetEdge(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 	(void)fd;
-	markov_setEdges(vde_conn, arg);
+	markovSetEdges(vde_conn, arg);
 	return 0;
 }
 
@@ -307,7 +327,7 @@ static int showInfo(struct vde_wirefilter_conn *vde_conn, int fd, char *arg) {
 					WIRE_FIELDS(MARKOV_GET_NODE(vde_conn, to_show_node), CHANBUFSIZE, RIGHT_TO_LEFT));
 
 	print_mgmt(fd, "Current Delay Queue size:   L->R %d      R->L %d   ", vde_conn->queue.byte_size[LEFT_TO_RIGHT], vde_conn->queue.byte_size[RIGHT_TO_LEFT]);
-	print_mgmt(fd,"Fifoness %s",(vde_conn->fifoness == FIFO) ? "TRUE" : "FALSE");
+	print_mgmt(fd,"Fifoness %s",(vde_conn->queue.fifoness == FIFO) ? "TRUE" : "FALSE");
 	print_mgmt(fd,"Waiting packets in delay queues %d", vde_conn->queue.size);
 	if (vde_conn->blink.socket_fd > 0) {
 		vde_conn->blink.message[vde_conn->blink.id_len] = '\0';
@@ -401,7 +421,8 @@ static int executeCommand(struct vde_wirefilter_conn *vde_conn, int socket_fd, c
 			} else {
 				print_mgmt(socket_fd, "1%03d %s", ret_value, strerror(ret_value));
 			}
-		} else if (ret_value != 0) {
+		} 
+		else if (ret_value != 0) {
 			print_log(LOG_ERR, "rc command error: %s %s", cmd_start, strerror(ret_value));
 		}
 	}

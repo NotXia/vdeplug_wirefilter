@@ -1,7 +1,6 @@
-#include "./time.h"
+#include "./wf_time.h"
 #include <time.h>
 #include <sys/time.h>
-#include <stdint.h>
 #include <sys/timerfd.h>
 
 /* Returns the current timestamp in microseconds */
@@ -12,10 +11,15 @@ uint64_t now_ns() {
 }
 
 /* Sets a timerfd, time is in nanoseconds */
-void setTimer(int timefd, uint64_t time) {
-	time_t seconds = time / (1000000000);
-	long nseconds = time % (1000000000);
+void setTimer(const int timefd, const uint64_t ns_time) {
+	time_t seconds = ns_time / (1000000000);
+	long nseconds = ns_time % (1000000000);
 	struct itimerspec next = { { 0, 0 }, { seconds, nseconds } };
 	
 	timerfd_settime(timefd, 0, &next, NULL);
+}
+
+void disarmTimer(const int timefd) {
+	static const struct itimerspec disarm_timer = { { 0, 0 }, { 0, 0 } };
+	timerfd_settime(timefd, 0, &disarm_timer, NULL);
 }

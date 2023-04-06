@@ -2,11 +2,31 @@
 #include "./wf_conn.h"
 #include "./wf_time.h"
 #include <stdlib.h>
+#include <sys/timerfd.h>
+#include <unistd.h>
 
 #define QUEUE_CHUNK 100
 
 
-static void resizeQueue(struct vde_wirefilter_conn *vde_conn, int new_size) {
+void initQueue(struct vde_wirefilter_conn *vde_conn, const char fifoness) {
+	vde_conn->queue.fifoness = fifoness;
+	vde_conn->queue.timerfd = timerfd_create(CLOCK_REALTIME, 0);
+	vde_conn->queue.queue = NULL;
+	vde_conn->queue.size = 0;
+	vde_conn->queue.max_size = 0;
+	vde_conn->queue.byte_size[LEFT_TO_RIGHT] = 0;
+	vde_conn->queue.byte_size[RIGHT_TO_LEFT] = 0;
+	vde_conn->queue.max_forward_time = 0;
+	vde_conn->queue.counter = 0;
+}
+
+void closeQueue(struct vde_wirefilter_conn *vde_conn) {
+	free(vde_conn->queue.queue);
+	close(vde_conn->queue.timerfd);
+}
+
+
+static void resizeQueue(struct vde_wirefilter_conn *vde_conn, const int new_size) {
 	if (vde_conn->queue.queue == NULL) {
 		vde_conn->queue.queue = malloc(new_size * sizeof(QueueNode*));
 
@@ -26,12 +46,12 @@ static void resizeQueue(struct vde_wirefilter_conn *vde_conn, int new_size) {
 }
 
 /*
-	Return:
+	Returns:
 	 1 if node1 > node2
 	 0 if node1 == node2
 	-1 if node1 < node2
 */
-static int compareNode(QueueNode *node1, QueueNode *node2) {
+static int compareNode(const QueueNode *node1, const QueueNode *node2) {
 	if (node1->forward_time == node2->forward_time && node1->counter == node2->counter) { return 0; }
 
 	if ( (node1->forward_time < node2->forward_time) || (node1->forward_time == node2->forward_time && node1->counter < node2->counter) ) {
@@ -45,9 +65,8 @@ static int compareNode(QueueNode *node1, QueueNode *node2) {
 void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, uint64_t forward_time) {
 	QueueNode *new = malloc(sizeof(QueueNode));
 
-
 	// Handle ordering for fifoness
-	if (vde_conn->fifoness == FIFO) {
+	if (vde_conn->queue.fifoness == FIFO) {
 		if (forward_time > vde_conn->queue.max_forward_time) {
 			// This packet has to be sent later than any of the current packets in the queue
 			// All future packets will be sent after this one (even if they should be sent before)
@@ -66,8 +85,6 @@ void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, uint64_t forw
 	new->forward_time = forward_time;
 	new->counter = vde_conn->queue.counter;
 
-
-
 	// Queue resize
 	if (vde_conn->queue.size >= vde_conn->queue.max_size) {
 		resizeQueue(vde_conn, vde_conn->queue.max_size + QUEUE_CHUNK);
@@ -76,7 +93,7 @@ void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, uint64_t forw
 	vde_conn->queue.size++;
 	vde_conn->queue.byte_size[packet->direction] += packet->len;
 
-	// Add new node to heap
+	// Adds new node to heap
 	int k = vde_conn->queue.size;
 	while ( compareNode(new, vde_conn->queue.queue[k>>1]) < 0 ) {
 		vde_conn->queue.queue[k] = vde_conn->queue.queue[k>>1];
@@ -128,5 +145,5 @@ void setQueueTimer(struct vde_wirefilter_conn *vde_conn) {
 	int64_t next_time_step = nextQueueTime(vde_conn) - now_ns();
 	if (next_time_step <= 0) next_time_step = 1;
 
-	setTimer(vde_conn->queue_timer, next_time_step);
+	setTimer(vde_conn->queue.timerfd, next_time_step);
 }

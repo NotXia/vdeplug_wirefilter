@@ -16,6 +16,9 @@ struct queuenode_t {
 typedef struct queuenode_t QueueNode;
 
 
+void initQueue(struct vde_wirefilter_conn *vde_conn, const char fifoness);
+void closeQueue(struct vde_wirefilter_conn *vde_conn);
+
 void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, uint64_t forward_time);
 Packet *dequeue(struct vde_wirefilter_conn *vde_conn);
 uint64_t nextQueueTime(struct vde_wirefilter_conn *vde_conn);
