@@ -76,6 +76,8 @@ static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_p
 static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id);
 static void closeBlink(struct vde_wirefilter_conn *vde_conn);
 
+static void savePidFile(char *path);
+
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
 	(void)descr; (void)interface_version; (void)open_args;
@@ -103,6 +105,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	char *noise_str = NULL;
 	char *blink_path_str = NULL, *blink_id_str = NULL;
 	char *management_socket_path = NULL, *management_mode_str = NULL;
+	char *pid_file_path = NULL;
 	struct vdeparms parms[] = {
 		{ "rc", &rc_path },
 		{ "delay", &delay_str },
@@ -117,6 +120,7 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ "noise", &noise_str },
 		{ "blink", &blink_path_str }, { "blinkid", &blink_id_str },
 		{ "mgmt", &management_socket_path }, { "mgmtmode", &management_mode_str },
+		{ "pidfile", &pid_file_path },
 		{ NULL, NULL }
 	};
 
@@ -168,6 +172,10 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 
 	if (rc_path) {
 		loadConfig(new_conn, -1, rc_path);
+	}
+
+	if (pid_file_path) {
+		savePidFile(pid_file_path);
 	}
 
 	// Starts packet handler thread
@@ -647,4 +655,20 @@ static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id) {
 static void closeBlink(struct vde_wirefilter_conn *vde_conn) {
 	close(vde_conn->blink.socket_fd);
 	remove(vde_conn->blink.socket_info.sun_path);
+}
+
+
+static void savePidFile(char *path) {
+	FILE *fout = NULL;
+
+	if ( (fout = fopen(path, "w")) == NULL ) { 
+		print_log(LOG_ERR, "Error in FILE* construction: %s", strerror(errno));
+		exit(1);
+	}
+	if ( fprintf(fout, "%d\n", getpid()) < 0 ) { 
+		print_log(LOG_ERR, "Error in writing pidfile"); 
+		exit(1);
+	}
+
+	fclose(fout);
 }
