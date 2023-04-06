@@ -432,7 +432,7 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 
 		noiseHandler(vde_conn, to_send);
 
-		if (delay_ms > 0) {
+		if (delay_ms > 0 || (vde_conn->queue.fifoness == FIFO && vde_conn->queue.size > 0)) {
 			enqueue(vde_conn, to_send, now_ns() + MS_TO_NS(delay_ms));
 			setQueueTimer(vde_conn);
 		}
