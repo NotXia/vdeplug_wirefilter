@@ -82,6 +82,11 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 
 	init_logs();
 
+	// Random seed
+	struct timeval v;
+	gettimeofday(&v,NULL);
+	srand48(v.tv_sec ^ v.tv_usec ^ getpid());
+
 	struct vde_wirefilter_conn *new_conn = NULL;
 	VDECONN *nested_conn;
 	char *nested_vnl;
