@@ -47,12 +47,12 @@ typedef struct {
 struct vde_wirefilter_conn;
 
 
-void initMarkov(struct vde_wirefilter_conn *vde_conn, const int size, const int start_node, const uint64_t change_frequency);
+int initMarkov(struct vde_wirefilter_conn *vde_conn, const int size, const int start_node, const uint64_t change_frequency);
 void closeMarkov(struct vde_wirefilter_conn *vde_conn);
 
 void markovSetEdges(struct vde_wirefilter_conn *vde_conn, char *edges_str);
 void markovSetNames(struct vde_wirefilter_conn *vde_conn, char *names_str);
-void markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_count);
+int markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_count);
 void markovStep(struct vde_wirefilter_conn *vde_conn, const int start_node);
 
 void setWireValue(struct vde_wirefilter_conn *vde_conn, const int tag, char *value_str, const int flags);

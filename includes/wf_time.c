@@ -2,6 +2,8 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
+#include <stdlib.h>
+#include "./wf_log.h"
 
 /* Returns the current timestamp in microseconds */
 uint64_t now_ns() {
@@ -16,10 +18,10 @@ void setTimer(const int timefd, const uint64_t ns_time) {
 	long nseconds = ns_time % (1000000000);
 	struct itimerspec next = { { 0, 0 }, { seconds, nseconds } };
 	
-	timerfd_settime(timefd, 0, &next, NULL);
+	handle_error( timerfd_settime(timefd, 0, &next, NULL) == -1, { exit(1); }, "Error while setting timerfd: %s", strerror(errno) );
 }
 
 void disarmTimer(const int timefd) {
 	static const struct itimerspec disarm_timer = { { 0, 0 }, { 0, 0 } };
-	timerfd_settime(timefd, 0, &disarm_timer, NULL);
+	handle_error( timerfd_settime(timefd, 0, &disarm_timer, NULL) == -1, { exit(1); }, "Error while disarming timerfd: %s", strerror(errno) );
 }

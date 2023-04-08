@@ -29,7 +29,7 @@ int initManagement(struct vde_wirefilter_conn *vde_conn, char *socket_path, char
 
 	vde_conn->management.connections_count = 0;
 	vde_conn->management.socket_name = socket_path;
-	if ( createManagementSocket(vde_conn, socket_path) < 0 ) { return -1; }
+	handle_error( createManagementSocket(vde_conn, socket_path) < 0, { return -1; }, "Error while creating management socket" );
 
 	return 0;
 }
@@ -45,15 +45,15 @@ int createManagementSocket(struct vde_wirefilter_conn *vde_conn, char *socket_na
 	struct sockaddr_un sun;
 	int one = 1;
 
-	if ( (socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0 ) { return -1; }
-	if ( setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(one) ) < 0) { return -1; }
-	if ( fcntl(socket_fd, F_SETFL, O_NONBLOCK) < 0 ) { return -1; }
+	handle_error( (socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0, { return -1; }, NULL );
+	handle_error( setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(one) ) < 0, { return -1; }, NULL );
+	handle_error( fcntl(socket_fd, F_SETFL, O_NONBLOCK) < 0, { return -1; }, NULL );
 	sun.sun_family = AF_UNIX;
 	snprintf(sun.sun_path, sizeof(sun.sun_path), "%s", socket_name);
 
-	if ( bind(socket_fd, (struct sockaddr *)&sun, sizeof(sun)) < 0 ) { return -1; }
+	handle_error( bind(socket_fd, (struct sockaddr *)&sun, sizeof(sun)) < 0, { return -1; }, NULL );
 	chmod(sun.sun_path, vde_conn->management.mode);
-	if ( listen(socket_fd, 15) < 0 ) { return -1; }
+	handle_error( listen(socket_fd, 15) < 0, { return -1; }, NULL );
 	
     vde_conn->management.socket_fd = socket_fd;
 
@@ -66,16 +66,17 @@ int acceptManagementConnection(struct vde_wirefilter_conn *vde_conn) {
 	char buf[MNGM_CMD_MAX_LEN];
 
 	new_connection = accept(vde_conn->management.socket_fd, NULL, NULL);
-	if (new_connection < 0) { return -1; }
+	handle_error( new_connection < 0, { return -1; }, "Error while accepting new management connection" );
 	
 	if (vde_conn->management.connections_count < MNGM_MAX_CONN) { // Connection can be accepted
 		snprintf(buf, MNGM_CMD_MAX_LEN, header, PACKAGE_VERSION);
-		if ( write(new_connection, buf, strlen(buf)) < 0 ) { return -1; }
-		if ( write(new_connection, prompt, strlen(prompt)) < 0 ) { return -1; }
+		handle_error( write(new_connection, buf, strlen(buf)) < 0, { return -1; }, "Error while sending message to management socket" );
+		handle_error( write(new_connection, prompt, strlen(prompt)) < 0, { return -1; }, "Error while sending message to management socket" );
 
 		vde_conn->management.connections[vde_conn->management.connections_count] = new_connection;
 		vde_conn->management.debug_level[vde_conn->management.connections_count] = 0;
         vde_conn->management.connections_count++;
+		
 		return new_connection;
 	} else { // Too many active connections
 		close(new_connection);
@@ -435,25 +436,21 @@ int handleManagementCommand(struct vde_wirefilter_conn *vde_conn, int socket_fd)
     int n;
 
 	n = read(socket_fd, buf, MNGM_CMD_MAX_LEN);
-
-	if (n <= 0) {
-		return -1;
+	handle_error( n <= 0, { return -1; }, "Error while receiving command from management socket" );
+	
+	buf[n] = '\0';
+	int ret_value = executeCommand(vde_conn, socket_fd, buf);
+	
+	if (ret_value >= 0) {
+		handle_error( write(socket_fd, prompt, strlen(prompt)) < 0, { return -1; }, "Error while printing prompt on management socket" );
 	}
-	else {
-		buf[n] = '\0';
-		int ret_value = executeCommand(vde_conn, socket_fd, buf);
-		
-		if (ret_value >= 0) { 
-			if (write(socket_fd, prompt, strlen(prompt)) < 0) { return -1; } 
-		}
 
-		return ret_value;
-	}
+	return ret_value;
 }
 
 int loadConfig(struct vde_wirefilter_conn *vde_conn, int fd, char *rc_path) {
 	FILE *f = fopen(rc_path, "r");
-	if (f == NULL) { return errno; }
+	handle_error( f == NULL, { return -1; }, "Error while opening rc file: %s", strerror(errno) );
 	char buf[MNGM_CMD_MAX_LEN];
 
 	while (fgets(buf, MNGM_CMD_MAX_LEN, f) != NULL) {

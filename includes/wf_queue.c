@@ -1,16 +1,18 @@
 #include "./wf_queue.h"
-#include "./wf_conn.h"
-#include "./wf_time.h"
 #include <stdlib.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
+#include "./wf_conn.h"
+#include "./wf_time.h"
+#include "./wf_log.h"
 
 #define QUEUE_CHUNK 100
 
 
-void initQueue(struct vde_wirefilter_conn *vde_conn, const char fifoness) {
+int initQueue(struct vde_wirefilter_conn *vde_conn, const char fifoness) {
 	vde_conn->queue.fifoness = fifoness;
 	vde_conn->queue.timerfd = timerfd_create(CLOCK_REALTIME, 0);
+	handle_error(vde_conn->queue.timerfd < 0, { return -1; }, "Queue timer fd init error: %s", strerror(errno));
 	vde_conn->queue.queue = NULL;
 	vde_conn->queue.size = 0;
 	vde_conn->queue.max_size = 0;
@@ -18,6 +20,8 @@ void initQueue(struct vde_wirefilter_conn *vde_conn, const char fifoness) {
 	vde_conn->queue.byte_size[RIGHT_TO_LEFT] = 0;
 	vde_conn->queue.max_forward_time = 0;
 	vde_conn->queue.counter = 0;
+	
+	return 0;
 }
 
 void closeQueue(struct vde_wirefilter_conn *vde_conn) {
@@ -29,9 +33,11 @@ void closeQueue(struct vde_wirefilter_conn *vde_conn) {
 static void resizeQueue(struct vde_wirefilter_conn *vde_conn, const int new_size) {
 	if (vde_conn->queue.queue == NULL) {
 		vde_conn->queue.queue = malloc(new_size * sizeof(QueueNode*));
+		handle_error( vde_conn->queue.queue == NULL, { exit(1); }, "Queue malloc error" );
 
 		if (new_size > 0) {
 			QueueNode *sentinel = malloc(sizeof(QueueNode));
+			handle_error( sentinel == NULL, { exit(1); }, "Queue sentinel malloc error" );
 			sentinel->packet = NULL;
 			sentinel->forward_time = 0;
 			sentinel->counter = 0;
@@ -40,6 +46,7 @@ static void resizeQueue(struct vde_wirefilter_conn *vde_conn, const int new_size
 	}
 	else {
 		vde_conn->queue.queue = realloc(vde_conn->queue.queue, new_size * sizeof(QueueNode*));
+		handle_error( vde_conn->queue.queue == NULL, { exit(1); }, "Queue realloc error" );
 	}
 	
 	vde_conn->queue.max_size = new_size;
@@ -64,6 +71,7 @@ static int compareNode(const QueueNode *node1, const QueueNode *node2) {
 
 void enqueue(struct vde_wirefilter_conn *vde_conn, Packet *packet, uint64_t forward_time) {
 	QueueNode *new = malloc(sizeof(QueueNode));
+	handle_error( new == NULL, { exit(1); }, "Queue new node malloc error" );
 
 	// Handle ordering for fifoness
 	if (vde_conn->queue.fifoness == FIFO) {

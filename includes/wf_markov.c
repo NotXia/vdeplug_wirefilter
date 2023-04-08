@@ -8,13 +8,17 @@
 #include "./wf_conn.h"
 #include "./wf_time.h"
 #include "./wf_management.h"
+#include "./wf_log.h"
 
 
-void initMarkov(struct vde_wirefilter_conn *vde_conn, const int size, const int start_node, const uint64_t change_frequency) {
-	markovResize(vde_conn, size <= 0 ? 1 : size);
+int initMarkov(struct vde_wirefilter_conn *vde_conn, const int size, const int start_node, const uint64_t change_frequency) {
+	handle_error( markovResize(vde_conn, size <= 0 ? 1 : size) < 0, { return -1; }, NULL );
 	vde_conn->markov.current_node = start_node;
 	vde_conn->markov.timerfd = timerfd_create(CLOCK_REALTIME, 0);
+	handle_error( vde_conn->markov.timerfd < 0, { return -1; }, "Markov timer fd init error: %s",  strerror(errno) );
 	vde_conn->markov.change_frequency = change_frequency;
+
+	return 0;
 }
 
 void closeMarkov(struct vde_wirefilter_conn *vde_conn) {
@@ -114,15 +118,18 @@ static void copyAdjacency(struct vde_wirefilter_conn *vde_conn, const int new_si
 /**
  * Increases or decreases the size of the Markov chain
 */
-void markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_count) {
-	if (vde_conn->markov.nodes_count == new_nodes_count) { return; }
+int markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_count) {
+	if (vde_conn->markov.nodes_count == new_nodes_count) { return 0; }
 	
 	// The current number of nodes is insufficient
 	if (vde_conn->markov.nodes_count < new_nodes_count) {
 		// Creates new nodes
 		vde_conn->markov.nodes = realloc(vde_conn->markov.nodes, new_nodes_count*(sizeof(struct markov_node *)));
+		handle_error(vde_conn->markov.nodes == NULL, { return -1; }, "Markov resize error");
+		
 		for (int i=vde_conn->markov.nodes_count; i<new_nodes_count; i++) {
 			vde_conn->markov.nodes[i] = calloc(1, sizeof(MarkovNode));
+			handle_error(vde_conn->markov.nodes[i] == NULL, { return -1; }, "Markov resize error");
 		}
 	} 
 	else { 
@@ -131,6 +138,7 @@ void markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_coun
 			free(vde_conn->markov.nodes[i]);
 		}
 		vde_conn->markov.nodes = realloc(vde_conn->markov.nodes, new_nodes_count*(sizeof(struct markov_node *)));
+		handle_error(vde_conn->markov.nodes == NULL, { return -1; }, "Markov resize error");
 
 		// Places the current node on a valid node
 		if (vde_conn->markov.current_node >= new_nodes_count) {
@@ -139,12 +147,15 @@ void markovResize(struct vde_wirefilter_conn *vde_conn, const int new_nodes_coun
 	}
 	
 	double *new_adjacency_map = calloc(new_nodes_count*new_nodes_count, sizeof(double));
+	handle_error(new_adjacency_map == NULL, { return -1; }, "Markov resize error");
 	copyAdjacency(vde_conn, new_nodes_count, new_adjacency_map);
 	
 	// Updates Markov information
 	if (vde_conn->markov.adjacency) { free(vde_conn->markov.adjacency); }
 	vde_conn->markov.adjacency = new_adjacency_map;
 	vde_conn->markov.nodes_count = new_nodes_count;
+
+	return 0;
 }
 
 

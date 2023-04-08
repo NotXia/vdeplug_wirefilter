@@ -72,11 +72,11 @@ static double speedHandler(struct vde_wirefilter_conn *vde_conn, const Packet *p
 static double delayHandler(struct vde_wirefilter_conn *vde_conn, const Packet *packet);
 static Packet *noiseHandler(struct vde_wirefilter_conn *vde_conn, Packet *packet);
 
-static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path);
+static int openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path);
 static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id);
 static void closeBlink(struct vde_wirefilter_conn *vde_conn);
 
-static void savePidFile(char *path);
+static int savePidFile(char *path);
 
 
 static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_version, struct vde_open_args *open_args) {
@@ -124,28 +124,25 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 		{ NULL, NULL }
 	};
 
-	nested_vnl = vde_parsenestparms(vde_url);							// Gets the nested VNL
-	if ( vde_parsepathparms(vde_url, parms) != 0 ) { return NULL; } 	// Retrieves the plugin parameters
+	nested_vnl = vde_parsenestparms(vde_url);											// Gets the nested VNL
+	handle_error( vde_parsepathparms(vde_url, parms) != 0, { return NULL; }, NULL );	// Retrieves the plugin parameters
 	
 	// Opens the connection with the nested VNL
 	nested_conn = vde_open(nested_vnl, descr, open_args);
-	if (nested_conn == NULL) { return NULL; }
+	handle_error( nested_conn == NULL, { return NULL; }, NULL );
 	
-	if ( (new_conn = calloc(1, sizeof(struct vde_wirefilter_conn))) == NULL ) {
-		errno = ENOMEM;
-		goto error;
-	}
+	new_conn = calloc(1, sizeof(struct vde_wirefilter_conn));
+	handle_error( new_conn == NULL, { goto error; }, NULL );
 	new_conn->conn = nested_conn;
 
 	// Pipes initialization
 	new_conn->send_pipefd = malloc(2*sizeof(int));
 	new_conn->receive_pipefd = malloc(2*sizeof(int));
-	if ( pipe(new_conn->send_pipefd) != 0 ) { goto error; } 
-	if ( pipe(new_conn->receive_pipefd) != 0 ) { goto error; } 
+	handle_error( pipe(new_conn->send_pipefd) != 0, { goto error; }, NULL );
+	handle_error( pipe(new_conn->receive_pipefd) != 0, { goto error; }, NULL );
 
-	initQueue(new_conn, nofifo_str == NULL ? FIFO : NO_FIFO);
-
-	initMarkov(new_conn, 1, 0, MS_TO_NS(100));
+	handle_error( initQueue(new_conn, nofifo_str == NULL ? FIFO : NO_FIFO) < 0, { goto error; }, NULL );
+	handle_error( initMarkov(new_conn, 1, 0, MS_TO_NS(100)) < 0, { goto error; }, NULL );
 	
 	setWireValue(new_conn, DELAY, delay_str, 0);
 	setWireValue(new_conn, DUP, dup_str, 0);
@@ -157,30 +154,31 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(new_conn, SPEED, speed_str, 0);
 	setWireValue(new_conn, NOISE, noise_str, 0);
 	new_conn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
+	handle_error( new_conn->speed_timer < 0, { goto error; }, NULL );
 	new_conn->bandwidth_next[LEFT_TO_RIGHT] = 0;
 	new_conn->bandwidth_next[RIGHT_TO_LEFT] = 0;
 
 	if (blink_path_str) { 
-		openBlinkSocket(new_conn, blink_path_str); 
-		if ( setBlinkId(new_conn, blink_id_str) == -1 ) { goto error; };
+		handle_error( openBlinkSocket(new_conn, blink_path_str) < 0, { goto error; }, NULL );
+		handle_error( setBlinkId(new_conn, blink_id_str) < 0, { goto error; }, NULL );
 	}
 
 	new_conn->management.socket_fd = -1;
 	if (management_socket_path) {
-		if ( initManagement(new_conn, management_socket_path, management_mode_str) < 0 ) { goto error; };
+		handle_error( initManagement(new_conn, management_socket_path, management_mode_str) < 0, { goto error; }, NULL );
 	}
 
 	if (rc_path) {
-		loadConfig(new_conn, -1, rc_path);
+		handle_error( loadConfig(new_conn, -1, rc_path) < 0, { goto error; }, NULL );
 	}
 
 	if (pid_file_path) {
-		savePidFile(pid_file_path);
+		handle_error( savePidFile(pid_file_path) < 0, { goto error; }, NULL );
 	}
 
 	// Starts packet handler thread
-	pthread_mutex_init(&new_conn->receive_lock, NULL);
-	if ( pthread_create(&new_conn->packet_handler_thread, NULL, &packetHandlerThread, (void*)new_conn) != 0 ) { goto error; };
+	handle_error( pthread_mutex_init(&new_conn->receive_lock, NULL) != 0, { goto error; }, NULL );
+	handle_error( pthread_create(&new_conn->packet_handler_thread, NULL, &packetHandlerThread, (void*)new_conn) != 0, { goto error; }, NULL );
 
 	return (VDECONN *)new_conn;
 
@@ -208,7 +206,7 @@ static ssize_t vde_wirefilter_recv(VDECONN *conn, void *buf, size_t len, int fla
 			ssize_t read_len = read(vde_conn->receive_pipefd[0], buf, VDE_ETHBUFSIZE);
 			pthread_mutex_unlock(&vde_conn->receive_lock);
 			
-			if (__builtin_expect(read_len < 0, 0)) { goto error; }
+			handle_error( read_len < 0, { goto error; }, "Thread error on receive pipe" );
 
 			return read_len;
 		}
@@ -230,9 +228,9 @@ static ssize_t vde_wirefilter_send(VDECONN *conn, const void *buf, size_t len, i
 	}
 
 	Packet *packet = malloc(sizeof(Packet));
-	if (__builtin_expect(packet == NULL, 0)) { goto error; }
+	handle_error( packet == NULL, { goto error; }, "Send packet malloc error" );
 	packet->buf = malloc(len);
-	if (__builtin_expect(packet->buf == NULL, 0)) { goto error; }
+	handle_error( packet->buf == NULL, { goto error; }, "Send packet payload malloc error" );
 
 	memcpy(packet->buf, buf, len);
 	packet->len = len;
@@ -240,9 +238,7 @@ static ssize_t vde_wirefilter_send(VDECONN *conn, const void *buf, size_t len, i
 	packet->direction = LEFT_TO_RIGHT;
 
 	// Passes the packet to the handler
-	if (__builtin_expect( write(vde_conn->send_pipefd[1], (void*)&packet, sizeof(void*)) < 0, 0 )) { 
-		goto error; 
-	}
+	handle_error( write(vde_conn->send_pipefd[1], (void*)&packet, sizeof(void*)) < 0, { goto error; }, "Thread error on send pipe" );
 
 	return 0;
 
@@ -323,7 +319,7 @@ static void *packetHandlerThread(void *param) {
 			if (poll_fd[POLL_PIPE_LR].revents & POLLIN) {
 				Packet *packet;
 				rw_len = read(vde_conn->send_pipefd[0], &packet, sizeof(void*));
-				if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
+				handle_error( rw_len < 0, {}, "Error while reading send pipe");
 
 				handlePacket(vde_conn, packet);
 				packetDestroy(packet);
@@ -341,10 +337,13 @@ static void *packetHandlerThread(void *param) {
 				}
 				else {
 					rw_len = vde_recv(vde_conn->conn, receive_buffer, VDE_ETHBUFSIZE, 0);
+					handle_error( rw_len < 0, { continue; }, "Error while reading receive pipe");
 					
 					if (rw_len > 1) { // Not discarded packet
 						Packet *packet = malloc(sizeof(Packet));
+						handle_error( packet == NULL, { continue; }, "Thread receive packet malloc error");
 						packet->buf = malloc(rw_len);
+						handle_error( packet->buf == NULL, { continue; }, "Thread receive packet payload malloc error");
 						memcpy(packet->buf, receive_buffer, rw_len);
 						packet->len = rw_len;
 						packet->flags = 0;
@@ -458,6 +457,8 @@ static void handlePacket(struct vde_wirefilter_conn *vde_conn, const Packet *pac
 
 /* Sends the packet to the correct destination */
 static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
+	ssize_t rw_len;
+
 	// Blink message handling
 	if (vde_conn->blink.socket_fd) {
 		char *message_content = vde_conn->blink.message + (vde_conn->blink.id_len+1); // Skip id and blank
@@ -469,15 +470,14 @@ static void sendPacket(struct vde_wirefilter_conn *vde_conn, Packet *packet) {
 	}
 
 	if (packet->direction == LEFT_TO_RIGHT) {
-		vde_send(vde_conn->conn, packet->buf, packet->len, packet->flags);
+		rw_len = vde_send(vde_conn->conn, packet->buf, packet->len, packet->flags);
+		handle_error( rw_len < 0, {}, "Error while sending a LR packet");
 	}
 	else {
-		ssize_t rw_len;
-
 		pthread_mutex_lock(&vde_conn->receive_lock);
 		// Makes the packet receivable
 		rw_len = write(vde_conn->receive_pipefd[1], packet->buf, packet->len);
-		if (__builtin_expect(rw_len < 0, 0)) { errno = EAGAIN; }
+		handle_error( rw_len < 0, {}, "Error while sending a RL packet");
 	}
 
 	free(packet);
@@ -631,11 +631,14 @@ static Packet *noiseHandler(struct vde_wirefilter_conn *vde_conn, Packet *packet
 }
 
 
-static void openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path) {
+static int openBlinkSocket(struct vde_wirefilter_conn *vde_conn, char *socket_path) {
 	vde_conn->blink.socket_info.sun_family = PF_UNIX;
 	strncpy(vde_conn->blink.socket_info.sun_path, socket_path, sizeof(vde_conn->blink.socket_info.sun_path)-1);
 
 	vde_conn->blink.socket_fd = socket(PF_UNIX, SOCK_DGRAM, 0);
+	handle_error( vde_conn->blink.socket_fd == -1, { return -1; }, "Blink socket error: %s", strerror(errno) );
+
+	return 0;
 }
 
 static int setBlinkId(struct vde_wirefilter_conn *vde_conn, char *id) {
@@ -658,17 +661,12 @@ static void closeBlink(struct vde_wirefilter_conn *vde_conn) {
 }
 
 
-static void savePidFile(char *path) {
+static int savePidFile(char *path) {
 	FILE *fout = NULL;
-
-	if ( (fout = fopen(path, "w")) == NULL ) { 
-		print_log(LOG_ERR, "Error in FILE* construction: %s", strerror(errno));
-		exit(1);
-	}
-	if ( fprintf(fout, "%d\n", getpid()) < 0 ) { 
-		print_log(LOG_ERR, "Error in writing pidfile"); 
-		exit(1);
-	}
+	
+	handle_error( (fout = fopen(path, "w")) == NULL, { return -1; }, "Error in FILE* construction: %s", strerror(errno) );
+	handle_error( fprintf(fout, "%d\n", getpid()) < 0, { return -1; }, "Error in writing pidfile" );
 
 	fclose(fout);
+	return 0;
 }
