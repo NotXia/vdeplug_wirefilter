@@ -3,7 +3,7 @@ project(
   "vdeplug_wirefilter"
   DESCRIPTION "libvdeplug plugin module for wirefilter"
   HOMEPAGE_URL ""
-  VERSION 0.0.1
+  VERSION 1.0.0
   LANGUAGES C
 )
 
@@ -31,9 +31,9 @@ foreach(HEADER IN LISTS HEADERS_REQUIRED)
   endif()
 endforeach(HEADER)
 
+add_compile_definitions(PACKAGE_VERSION="${CMAKE_PROJECT_VERSION}")
 add_definitions(-D_GNU_SOURCE)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
 
 include_directories("./includes")
 add_subdirectory("./includes")

@@ -13,7 +13,9 @@
 #include "./wf_log.h"
 
 
-#define PACKAGE_VERSION "1.0"
+#ifndef PACKAGE_VERSION
+#define PACKAGE_VERSION "not found"
+#endif
 
 static char header[]="\nVDE wirefilter V.%s\n";
 static char prompt[]="\nVDEwf$ ";
