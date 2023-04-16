@@ -153,6 +153,8 @@ static VDECONN *vde_wirefilter_open(char *vde_url, char *descr, int interface_ve
 	setWireValue(new_conn, BANDWIDTH, bandwidth_str, 0);
 	setWireValue(new_conn, SPEED, speed_str, 0);
 	setWireValue(new_conn, NOISE, noise_str, 0);
+	new_conn->speed_next[LEFT_TO_RIGHT] = 0;
+	new_conn->speed_next[RIGHT_TO_LEFT] = 0;
 	new_conn->speed_timer = timerfd_create(CLOCK_REALTIME, 0);
 	handle_error( new_conn->speed_timer < 0, { goto error; }, NULL );
 	new_conn->bandwidth_next[LEFT_TO_RIGHT] = 0;

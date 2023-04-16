@@ -215,7 +215,7 @@ static int parseWireValueString(char* string, double *value, double *plus, char 
 
 		char *node_number_str = (&string[n]) + 1;
 		sscanf(node_number_str, "%d", to_set_node);
-		string[n] = '\0';
+		string[n--] = '\0';
 	}
 
 	// Reads algorithm (if set)
