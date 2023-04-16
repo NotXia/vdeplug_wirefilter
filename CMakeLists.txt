@@ -42,4 +42,6 @@ target_link_libraries(vdeplug_wirefilter vdeplug_mod Threads::Threads wf_conn wf
 
 install(TARGETS vdeplug_wirefilter DESTINATION ${CMAKE_INSTALL_LIBDIR}/vdeplug)
 
+add_subdirectory(man)
+
 add_custom_target(uninstall "${CMAKE_COMMAND}" -P "${PROJECT_SOURCE_DIR}/Uninstall.cmake")
